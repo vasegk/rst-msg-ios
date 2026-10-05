@@ -47,7 +47,7 @@ jobs:
             -project RST.xcodeproj -scheme RST \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath build/TestResults.xcresult \
-            -continueBuildingAfterErrors \
+            -IDEBuildingContinueBuildingAfterErrors=YES \
             CODE_SIGNING_ALLOWED=NO | tee build-test.log | grep -E "error:|warning: unre|Test Case|Executed|\*\* TEST" || true
           grep -q "\*\* TEST SUCCEEDED \*\*" build-test.log
 
