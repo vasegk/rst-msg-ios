@@ -111,11 +111,16 @@ private struct ChatContent: View {
                 }
                 Text(model.subtitle)
                     .font(.system(size: 12))
-                    .foregroundStyle(store.typingText(model.chatId, isGroup: model.isGroup) != nil || store.chat(model.chatId)?.online == true ? Theme.accent : Theme.muted)
+                    .foregroundStyle(subtitleHighlighted ? Theme.accent : Theme.muted)
                     .lineLimit(1)
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private var subtitleHighlighted: Bool {
+        if store.typingText(model.chatId, isGroup: model.isGroup) != nil { return true }
+        return store.chat(model.chatId)?.online == true && !model.isGroup
     }
 
     private func openInfo() {

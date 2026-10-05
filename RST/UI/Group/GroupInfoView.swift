@@ -41,8 +41,7 @@ struct GroupInfoView: View {
                         }
                     Text(info?.name ?? store.title(for: chatId))
                         .font(.system(size: 22, weight: .bold))
-                    Text(info?.isChannel == true ? "канал · \(info?.subscribers ?? info?.members?.count ?? 0) подписч." :
-                            "\(info?.members?.count ?? 0) \(Plural.members(info?.members?.count ?? 0))")
+                    Text(countLine)
                         .font(.system(size: 14))
                         .foregroundStyle(Theme.muted)
                 }
@@ -147,6 +146,15 @@ struct GroupInfoView: View {
         .confirmationDialog("Удалить группу для всех?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { deleteGroup() }
         }
+    }
+
+    private var countLine: String {
+        let members: Int = info?.members?.count ?? 0
+        if info?.isChannel == true {
+            let subscribers: Int = info?.subscribers ?? members
+            return "канал · \(subscribers) подписч."
+        }
+        return "\(members) " + Plural.members(members)
     }
 
     private var sortedMembers: [GroupMemberDto] {

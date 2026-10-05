@@ -271,7 +271,10 @@ enum ServerTime {
         if let dot = s.firstIndex(of: "."), let zoneStart = s[dot...].firstIndex(where: { $0 == "Z" || $0 == "+" || $0 == "-" }) {
             let fraction = s[s.index(after: dot)..<zoneStart]
             if fraction.count > 3 {
-                s = String(s[..<s.index(after: dot)]) + fraction.prefix(3) + String(s[zoneStart...])
+                let head: String = String(s[..<s.index(after: dot)])
+                let millis: String = String(fraction.prefix(3))
+                let zone: String = String(s[zoneStart...])
+                s = head + millis + zone
             }
         }
         return withFraction.date(from: s) ?? plain.date(from: s)
