@@ -81,7 +81,10 @@ final class AppModel {
 
     init() {
         let services = self.services
-        services.api.isSessionOver = { [weak self] in self?.phase == .loggedOut }
+        // Сеанс окончен, когда токена нет: при выходе и по 401 он стирается.
+        // Смотреть на экран нельзя — во время входа он тоже «вне сеанса»,
+        // а запрос своего ключа после /api/login уже идёт с токеном.
+        services.api.isSessionOver = { [weak services] in services?.session.accessToken == nil }
         services.api.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.endSession(.expired) }
         }
