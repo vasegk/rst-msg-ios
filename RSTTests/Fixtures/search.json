@@ -1,0 +1,18 @@
+{
+ "users": [
+  {
+   "username": "bob_test",
+   "name": "bob_test",
+   "avatar_url": "",
+   "bio": "",
+   "verified": true,
+   "music_url": "/uploads/46c52a47611d48b594782632eb890df4.wav",
+   "music_title": "Тестовый трек",
+   "birthday": "",
+   "online": false,
+   "status": "online",
+   "unread": 0,
+   "is_system": false
+  }
+ ]
+}

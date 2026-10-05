@@ -1,0 +1,81 @@
+name: Сборка iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Симулятор
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          runtimes = sorted((r for r in data if "iOS" in r), reverse=True)
+          for r in runtimes:
+              for d in data[r]:
+                  if d["name"].startswith("iPhone"):
+                      print(d["udid"]); sys.exit(0)
+          sys.exit(1)
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Симулятор: $UDID"
+
+      - name: Тесты криптографии и протокола
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project RST.xcodeproj -scheme RST \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath build/TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO | tee build-test.log | grep -E "error:|warning: unre|Test Case|Executed|\*\* TEST" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" build-test.log
+
+      - name: Сборка для устройства (без подписи)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project RST.xcodeproj -scheme RST -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tee build-device.log | grep -E "error:|\*\* BUILD" || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" build-device.log
+          mkdir -p build/ipa/Payload
+          cp -R build/dd/Build/Products/Release-iphoneos/RST.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../RST-unsigned.ipa Payload)
+
+      - name: Выложить IPA (без подписи)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rst-ios-unsigned-ipa
+          path: build/RST-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Журналы сборки
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build-test.log
+            build-device.log
+          if-no-files-found: ignore

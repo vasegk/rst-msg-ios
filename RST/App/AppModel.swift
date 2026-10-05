@@ -1,0 +1,233 @@
+import Foundation
+import Observation
+import SwiftUI
+
+/// Адреса сервера: из Info.plist (RSTBaseURL, RSTWebSocketURL), боевой — rst-msg.ru.
+enum AppConfig {
+    static var baseURL: URL {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "RSTBaseURL") as? String ?? "https://rst-msg.ru"
+        return URL(string: raw) ?? URL(string: "https://rst-msg.ru")!
+    }
+
+    static var wsBase: String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "RSTWebSocketURL") as? String ?? "wss://rst-msg.ru"
+        return raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+    }
+
+    static var version: String {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "\(v) (\(b))"
+    }
+}
+
+/// Все сервисы приложения. Живут столько же, сколько процесс.
+@MainActor
+@Observable
+final class Services {
+    let session: SessionStore
+    let api: RstApi
+    let socket: RstWebSocket
+    let keyCache: ChatKeyCache
+    let userKeys: UserKeyRepository
+    let groupKeys: GroupKeyRepository
+    let messages: MessageRepository
+    let attachments: AttachmentRepository
+    let auth: AuthRepository
+    let chats: ChatListStore
+
+    init() {
+        let session = SessionStore()
+        let keyCache = ChatKeyCache()
+        let api = RstApi(baseURL: AppConfig.baseURL, tokenProvider: { session.accessToken })
+        let socket = RstWebSocket(wsBase: AppConfig.wsBase,
+                                  tokenProvider: { session.accessToken },
+                                  usernameProvider: { session.username })
+        let userKeys = UserKeyRepository(api: api, session: session)
+        let groupKeys = GroupKeyRepository(api: api, userKeys: userKeys)
+        let messages = MessageRepository(api: api, session: session, socket: socket, userKeys: userKeys,
+                                         groupKeys: groupKeys, keyCache: keyCache)
+        self.session = session
+        self.keyCache = keyCache
+        self.api = api
+        self.socket = socket
+        self.userKeys = userKeys
+        self.groupKeys = groupKeys
+        self.messages = messages
+        self.attachments = AttachmentRepository(api: api)
+        self.auth = AuthRepository(api: api, session: session, userKeys: userKeys)
+        self.chats = ChatListStore(api: api, session: session, socket: socket, messages: messages, userKeys: userKeys)
+    }
+
+    var me: String { session.username ?? "" }
+}
+
+/// Состояние приложения верхнего уровня: вход или переписка.
+@MainActor
+@Observable
+final class AppModel {
+    enum Phase { case launching, loggedOut, loggedIn }
+
+    private(set) var phase: Phase = .launching
+    /// Почему сеанс закончился — экран входа показывает этот текст.
+    var sessionEndMessage: String?
+    /// Чат, который нужно открыть (по ссылке, из уведомления).
+    var pendingChat: String?
+    /// Тема: тёмная по умолчанию, как в вебе.
+    var colorScheme: ColorScheme? = .dark
+
+    let services = Services()
+    @ObservationIgnored private var sessionEnding = false
+
+    init() {
+        let services = self.services
+        services.api.isSessionOver = { [weak self] in self?.phase == .loggedOut }
+        services.api.onUnauthorized = { [weak self] in
+            Task { @MainActor in self?.endSession(.expired) }
+        }
+        services.socket.onSessionEnd = { [weak self] reason in
+            self?.endSession(reason)
+        }
+        services.socket.subscribe { [weak self] event in
+            self?.handleGlobal(event)
+        }
+        services.messages.onOutboxChanged = { [weak services] in services?.chats.outboxChanged() }
+        switch UserDefaults.standard.string(forKey: "rst.theme") {
+        case "light": colorScheme = .light
+        case "system": colorScheme = nil
+        default: colorScheme = .dark
+        }
+    }
+
+    func start() {
+        Task { await loadLimits() }
+        if services.auth.canRestoreSession() {
+            enterApp()
+        } else {
+            if services.session.current != nil { sessionEndMessage = SessionEnd.expired.message }
+            services.session.clear()
+            phase = .loggedOut
+        }
+    }
+
+    private func loadLimits() async {
+        if let limits = try? await services.api.limits(), let max = limits.maxUploadBytes {
+            services.attachments.maxUploadBytes = max
+        }
+    }
+
+    /// После входа или регистрации: сокет, список чатов.
+    func enterApp() {
+        sessionEnding = false
+        sessionEndMessage = nil
+        services.socket.resetSessionEnd()
+        services.socket.connect()
+        phase = .loggedIn
+        Task {
+            await services.auth.refreshTokenIfDue()
+            await services.chats.refresh()
+        }
+    }
+
+    func setTheme(_ value: String) {
+        UserDefaults.standard.set(value, forKey: "rst.theme")
+        switch value {
+        case "light": colorScheme = .light
+        case "system": colorScheme = nil
+        default: colorScheme = .dark
+        }
+    }
+
+    // MARK: - Жизненный цикл
+
+    func scenePhaseChanged(_ phase: ScenePhase) {
+        guard self.phase == .loggedIn else { return }
+        switch phase {
+        case .active:
+            services.socket.setActive(true)
+            services.socket.connect()
+            Task {
+                await services.auth.refreshTokenIfDue()
+                await services.chats.refresh()
+            }
+        case .background:
+            services.socket.setActive(false)
+        default:
+            break
+        }
+    }
+
+    // MARK: - Выход
+
+    func logout() {
+        clearLocalData()
+        phase = .loggedOut
+    }
+
+    private func endSession(_ reason: SessionEnd) {
+        guard phase == .loggedIn, !sessionEnding else { return }
+        sessionEnding = true
+        sessionEndMessage = reason.message
+        clearLocalData()
+        phase = .loggedOut
+    }
+
+    private func clearLocalData() {
+        services.socket.disconnect()
+        services.keyCache.clear()
+        services.userKeys.clear()
+        services.attachments.clear()
+        services.messages.clearOutbox()
+        services.chats.clear()
+        services.session.clear()
+    }
+
+    private func handleGlobal(_ event: WsEvent) {
+        switch event {
+        case .userRenamed(let old, let new, let token):
+            // Администратор переименовал учётную запись: у своей — новый токен
+            guard old == services.session.username, !new.isEmpty else { return }
+            services.session.update {
+                $0.username = new
+                if let token {
+                    $0.accessToken = token
+                    $0.tokenRefreshedAt = Date()
+                }
+            }
+            services.userKeys.clear()
+            services.keyCache.clear()
+            services.socket.reconnect()
+        case .connection(let connected, _):
+            if connected { services.messages.flushOutbox() }
+        default:
+            break
+        }
+    }
+
+    // MARK: - Ссылки
+
+    /// rstmsg://… и https://rst-msg.ru/… : приглашение в группу, профиль, чат.
+    func open(url: URL) {
+        let raw = url.absoluteString
+        if let invite = InviteLink.parse(raw) {
+            Task { await joinByInvite(invite) }
+            return
+        }
+        let path = url.path
+        if path.hasPrefix("/@") {
+            pendingChat = String(path.dropFirst(2))
+        }
+    }
+
+    var joinError: String?
+
+    private func joinByInvite(_ invite: InviteLink) async {
+        do {
+            let chatId = try await services.groupKeys.join(invite: invite)
+            await services.chats.refresh()
+            pendingChat = chatId
+        } catch {
+            joinError = error.localizedDescription
+        }
+    }
+}

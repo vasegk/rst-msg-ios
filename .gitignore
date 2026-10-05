@@ -1,0 +1,17 @@
+# Проект генерируется XcodeGen из project.yml
+RST.xcodeproj/
+*.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+
+build/
+DerivedData/
+*.xcresult
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+xcuserdata/
+*.xcuserstate
+.DS_Store
+
+.claude/settings.local.json

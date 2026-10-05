@@ -1,0 +1,29 @@
+{
+ "group_id": "1",
+ "name": "Test group",
+ "avatar_url": null,
+ "description": "",
+ "members": [
+  {
+   "username": "alice_test",
+   "avatar_url": "",
+   "role": "owner",
+   "display_name": null,
+   "status": "online",
+   "has_key": true
+  },
+  {
+   "username": "bob_test",
+   "avatar_url": "",
+   "role": "member",
+   "display_name": null,
+   "status": "online",
+   "has_key": true
+  }
+ ],
+ "is_public": false,
+ "invite_hash": "qdtBfprMCfBKpZz-lRsotQ",
+ "alias": null,
+ "admins_only": false,
+ "slow_mode": 0
+}

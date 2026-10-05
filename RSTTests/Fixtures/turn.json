@@ -1,0 +1,7 @@
+{
+ "iceServers": [
+  {
+   "urls": "stun:localhost:3478"
+  }
+ ]
+}
