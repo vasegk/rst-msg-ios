@@ -49,6 +49,27 @@ struct SettingsView: View {
             }
 
             Section {
+                HStack {
+                    Label("@" + services.me, systemImage: "person.crop.circle.fill")
+                    Spacer()
+                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                }
+                ForEach(app.savedAccounts, id: \.username) { account in
+                    Button { app.switchAccount(account.username) } label: {
+                        Label("@" + account.username, systemImage: "person.crop.circle")
+                    }
+                    .swipeActions {
+                        Button("Убрать", role: .destructive) { app.forgetAccount(account.username) }
+                    }
+                }
+                Button { app.addAccount() } label: { Label("Добавить аккаунт", systemImage: "plus.circle") }
+            } header: {
+                Text("Аккаунты")
+            } footer: {
+                Text("Переключаться между аккаунтами можно без пароля. Смахните аккаунт влево, чтобы убрать его с устройства.")
+            }
+
+            Section {
                 Button(role: .destructive) { confirmLogout = true } label: {
                     Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
                 }

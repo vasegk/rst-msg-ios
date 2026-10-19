@@ -123,6 +123,8 @@ final class AppModel {
 
     /// После входа или регистрации: сокет, список чатов.
     func enterApp() {
+        addingAccount = false
+        accountsVersion += 1
         sessionEnding = false
         sessionEndMessage = nil
         services.socket.resetSessionEnd()
@@ -166,7 +168,59 @@ final class AppModel {
 
     func logout() {
         clearLocalData()
+        // Есть другие аккаунты — сразу в следующий
+        if let next = services.session.saved.first {
+            switchAccount(next.username)
+            return
+        }
         phase = .loggedOut
+    }
+
+    // MARK: - Несколько аккаунтов (js/accounts.js)
+
+    /// Добавляем аккаунт: на экране входа можно вернуться к прежнему.
+    var addingAccount = false
+    var savedAccounts: [StoredSession] { _ = accountsVersion; return services.session.saved }
+    private var accountsVersion = 0
+
+    func addAccount() {
+        clearCaches()
+        services.session.parkCurrent()
+        accountsVersion += 1
+        addingAccount = true
+        sessionEndMessage = nil
+        phase = .loggedOut
+    }
+
+    func switchAccount(_ username: String) {
+        clearCaches()
+        guard services.session.activate(username) else { return }
+        accountsVersion += 1
+        addingAccount = false
+        if services.auth.canRestoreSession() {
+            enterApp()
+        } else {
+            // Срок токена истёк — этот аккаунт придётся войти заново
+            services.session.clear()
+            sessionEndMessage = "Сеанс @\(username) истёк — войдите снова"
+            phase = .loggedOut
+        }
+    }
+
+    func forgetAccount(_ username: String) {
+        services.session.forgetSaved(username)
+        accountsVersion += 1
+    }
+
+    /// Всё, что относится к одному аккаунту, кроме самого сеанса.
+    private func clearCaches() {
+        services.socket.disconnect()
+        services.keyCache.clear()
+        services.userKeys.clear()
+        services.attachments.clear()
+        services.messages.clearOutbox()
+        services.chats.clear()
+        services.stickers.clear()
     }
 
     private func endSession(_ reason: SessionEnd) {
@@ -178,14 +232,9 @@ final class AppModel {
     }
 
     private func clearLocalData() {
-        services.socket.disconnect()
-        services.keyCache.clear()
-        services.userKeys.clear()
-        services.attachments.clear()
-        services.messages.clearOutbox()
-        services.chats.clear()
-        services.stickers.clear()
+        clearCaches()
         services.session.clear()
+        accountsVersion += 1
     }
 
     private func handleGlobal(_ event: WsEvent) {

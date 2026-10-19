@@ -12,6 +12,25 @@ struct AuthFlowView: View {
             VStack(spacing: 28) {
                 header
                     .padding(.top, 48)
+                if !app.savedAccounts.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(app.addingAccount ? "Или вернитесь в аккаунт" : "Аккаунты на этом устройстве")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        ForEach(app.savedAccounts, id: \.username) { account in
+                            Button { app.switchAccount(account.username) } label: {
+                                HStack {
+                                    Image(systemName: "person.crop.circle.fill").font(.system(size: 22))
+                                    Text("@" + account.username).font(.system(size: 16, weight: .medium))
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                                }
+                                .padding(12)
+                                .background(Theme.input, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
                 switch mode {
                 case .login: LoginForm(mode: $mode)
                 case .register: RegisterForm(mode: $mode)

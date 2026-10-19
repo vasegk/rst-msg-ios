@@ -65,15 +65,58 @@ struct StoredSession: Codable, Equatable {
     var tokenRefreshedAt: Date
 }
 
-/// Текущий сеанс: копия в памяти плюс связка ключей.
+/// Текущий сеанс: копия в памяти плюс связка ключей. Другие аккаунты этого
+/// устройства (как js/accounts.js) лежат рядом списком — переключение не
+/// требует пароля.
 final class SessionStore {
     private let account = "session.current"
+    private let savedAccount = "session.saved"
     private(set) var current: StoredSession?
+    /// Остальные аккаунты на устройстве, без текущего.
+    private(set) var saved: [StoredSession] = []
 
     init() {
         if let data = Keychain.read(account) {
             current = try? JSONDecoder().decode(StoredSession.self, from: data)
         }
+        if let data = Keychain.read(savedAccount) {
+            saved = (try? JSONDecoder().decode([StoredSession].self, from: data)) ?? []
+        }
+    }
+
+    private func persistSaved() {
+        if saved.isEmpty {
+            Keychain.delete(savedAccount)
+        } else if let data = try? JSONEncoder().encode(saved) {
+            Keychain.write(savedAccount, data)
+        }
+    }
+
+    /// «Добавить аккаунт»: текущий — в список, вход начинается с чистого листа.
+    func parkCurrent() {
+        guard let c = current, c.privateKeyJwk != nil else { return }
+        saved.removeAll { $0.username == c.username }
+        saved.insert(c, at: 0)
+        persistSaved()
+        current = nil
+        Keychain.delete(account)
+    }
+
+    /// Сделать текущим аккаунт из списка; прежний текущий уходит в список.
+    @discardableResult
+    func activate(_ username: String) -> Bool {
+        guard let i = saved.firstIndex(where: { $0.username == username }) else { return false }
+        let next = saved.remove(at: i)
+        if let c = current, c.privateKeyJwk != nil { saved.insert(c, at: 0) }
+        persistSaved()
+        save(next)
+        return true
+    }
+
+    /// Убрать аккаунт из списка (сеанс кончился или вышли из него).
+    func forgetSaved(_ username: String) {
+        saved.removeAll { $0.username == username }
+        persistSaved()
     }
 
     var isLoggedIn: Bool { current?.privateKeyJwk != nil }
@@ -87,6 +130,7 @@ final class SessionStore {
 
     func save(_ session: StoredSession) {
         current = session
+        if saved.contains(where: { $0.username == session.username }) { forgetSaved(session.username) }
         if let data = try? JSONEncoder().encode(session) { Keychain.write(account, data) }
     }
 
