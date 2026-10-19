@@ -66,7 +66,7 @@ struct ComposerView: View {
                         }
                     }
                     .frame(maxHeight: 180)
-                    .background(Theme.surface.opacity(0.97))
+                    .rstBar(classic: Theme.surface.opacity(0.97))
                 }
             }
 
@@ -202,7 +202,7 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Theme.surface.opacity(0.95))
+        .rstBar(classic: Theme.surface.opacity(0.95))
     }
 
     private var inputBar: some View {
@@ -216,7 +216,7 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .background(ChatAppearance.shared.isGlass ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.ultraThinMaterial))
     }
 
     @ViewBuilder
@@ -234,6 +234,7 @@ struct ComposerView: View {
                 .font(.system(size: 22))
                 .foregroundStyle(Theme.muted)
                 .frame(width: 40, height: 44)
+                .glassCircleOnly()
         }
         .disabled(model.editing != nil)
 
@@ -243,7 +244,7 @@ struct ComposerView: View {
             .font(.system(size: 16))
             .padding(.horizontal, 15)
             .padding(.vertical, 11)
-            .background(Theme.input, in: RoundedRectangle(cornerRadius: 22))
+            .rstSurface(RoundedRectangle(cornerRadius: 22), classic: Theme.input)
             .overlay(RoundedRectangle(cornerRadius: 22).stroke(focused ? Theme.accent.opacity(0.7) : Theme.outline))
 
         if model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.editing == nil {
@@ -309,7 +310,7 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .rstBar(classic: .ultraThinMaterial)
     }
 
     // MARK: - Действия

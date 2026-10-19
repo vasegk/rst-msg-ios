@@ -173,7 +173,7 @@ struct RstTextFieldStyle: TextFieldStyle {
         configuration
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
-            .background(Theme.input, in: RoundedRectangle(cornerRadius: 14))
+            .rstSurface(RoundedRectangle(cornerRadius: 14), classic: Theme.input)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.outline))
     }
 }
@@ -187,10 +187,10 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(
-                LinearGradient(colors: [Theme.accentLight, Theme.accent], startPoint: .leading, endPoint: .trailing)
-                    .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.4),
-                in: RoundedRectangle(cornerRadius: 12))
+            .rstSurface(RoundedRectangle(cornerRadius: ChatAppearance.shared.isGlass ? 24 : 12),
+                        classic: LinearGradient(colors: [Theme.accentLight, Theme.accent], startPoint: .leading, endPoint: .trailing)
+                            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.4),
+                        tint: Theme.accent.opacity(isEnabled ? 0.9 : 0.4), interactive: true)
     }
 }
 

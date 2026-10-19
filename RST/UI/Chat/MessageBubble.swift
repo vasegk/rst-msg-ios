@@ -170,19 +170,12 @@ struct MessageRow: View {
             .padding(.top, 8)
             .padding(.bottom, 6)
             .foregroundStyle(message.isMine ? Color.white : Theme.onSurface)
-            .background(bubbleBackground)
+            .rstSurface(BubbleShape(isMine: message.isMine),
+                        classic: message.isMine ? AnyShapeStyle(Theme.ownBubble) : AnyShapeStyle(Theme.otherBubble.opacity(0.92)),
+                        tint: message.isMine ? Theme.accent.opacity(0.85) : nil)
             .clipShape(BubbleShape(isMine: message.isMine))
             .frame(maxWidth: 320, alignment: message.isMine ? .trailing : .leading)
             .onTapGesture(count: 2) { if !message.pending { model.react(message, ChatAppearance.shared.quickReaction) } }
-        }
-    }
-
-    @ViewBuilder
-    private var bubbleBackground: some View {
-        if message.isMine {
-            Theme.ownBubble
-        } else {
-            Theme.otherBubble.opacity(0.92)
         }
     }
 

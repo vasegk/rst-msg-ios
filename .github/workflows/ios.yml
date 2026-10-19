@@ -16,7 +16,9 @@ jobs:
 
       - name: Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+          # Liquid Glass — только в SDK iOS 26: берём самый свежий Xcode 26, иначе прежний
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          sudo xcode-select -s "${X:-/Applications/Xcode_16.4.app}" || sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
       - name: XcodeGen

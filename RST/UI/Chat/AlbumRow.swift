@@ -88,7 +88,9 @@ struct AlbumRow: View {
             }
             .padding(6)
             .foregroundStyle(isMine ? Color.white : Theme.onSurface)
-            .background(isMine ? AnyShapeStyle(Theme.ownBubble) : AnyShapeStyle(Theme.otherBubble.opacity(0.92)))
+            .rstSurface(BubbleShape(isMine: isMine),
+                        classic: isMine ? AnyShapeStyle(Theme.ownBubble) : AnyShapeStyle(Theme.otherBubble.opacity(0.92)),
+                        tint: isMine ? Theme.accent.opacity(0.85) : nil)
             .clipShape(BubbleShape(isMine: isMine))
             .frame(maxWidth: 290, alignment: isMine ? .trailing : .leading)
             if !isMine { Spacer(minLength: 40) }

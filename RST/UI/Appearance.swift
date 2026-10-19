@@ -48,6 +48,8 @@ final class ChatAppearance: @unchecked Sendable {
     var linkPreviews: Bool { didSet { defaults.set(linkPreviews, forKey: "rst.linkPreviews") } }
     var compressPhotos: Bool { didSet { defaults.set(compressPhotos, forKey: "rst.compressPhotos") } }
     var autoPhotos: AutoDownload { didSet { defaults.set(autoPhotos.rawValue, forKey: "rst.autoPhotos") } }
+    /// Классический (как в вебе) или Liquid Glass.
+    var design: DesignMode { didSet { defaults.set(design.rawValue, forKey: "rst.design") } }
     /// Картинка обоев поменялась — перечитать файл.
     private(set) var wallpaperVersion = 0
     /// Сеть дорогая (сотовая, режим экономии) — для «Только по Wi-Fi».
@@ -67,6 +69,7 @@ final class ChatAppearance: @unchecked Sendable {
         linkPreviews = d.object(forKey: "rst.linkPreviews") as? Bool ?? true
         compressPhotos = d.object(forKey: "rst.compressPhotos") as? Bool ?? true
         autoPhotos = AutoDownload(rawValue: d.string(forKey: "rst.autoPhotos") ?? "") ?? .always
+        design = DesignMode(rawValue: d.string(forKey: "rst.design") ?? "") ?? .classic
         monitor.pathUpdateHandler = { [weak self] path in
             let expensive = path.isExpensive || path.isConstrained
             DispatchQueue.main.async { self?.expensiveNetwork = expensive }
@@ -240,6 +243,19 @@ struct ChatSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Дизайн", selection: $look.design) {
+                    ForEach(DesignMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Дизайн")
+            } footer: {
+                Text(ChatAppearance.nativeGlass
+                     ? "«Классический» — как в веб-версии. «Liquid Glass» — оформление iOS 26: стеклянные панели, кнопки и сообщения."
+                     : "«Классический» — как в веб-версии. «Liquid Glass» — стеклянное оформление iOS 26; на этой версии iOS — приближённо, полупрозрачным материалом.")
+            }
+
             Section("Тема") {
                 Picker("Тема", selection: Binding(get: {
                     switch app.colorScheme {

@@ -158,6 +158,7 @@ struct RecordButton: View {
             .foregroundStyle(rec.holding ? Theme.accent : Theme.muted)
             .scaleEffect(rec.holding ? 1.25 : 1)
             .frame(width: 44, height: 44)
+            .glassCircleOnly()
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.15), value: rec.holding)
             .animation(.easeOut(duration: 0.15), value: rec.mode)

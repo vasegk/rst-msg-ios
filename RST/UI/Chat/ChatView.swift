@@ -190,7 +190,7 @@ private struct ChatContent: View {
                 }
             }
         }
-        .toolbarBackground(.visible, for: .navigationBar)
+        .modifier(NavigationBarDesign())
         .overlay {
             if confetti { ConfettiView().ignoresSafeArea().allowsHitTesting(false) }
         }
@@ -246,8 +246,7 @@ private struct ChatContent: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 40, height: 40)
-                .background(Circle().fill(Theme.card))
-                .overlay(Circle().stroke(Theme.outline))
+                .rstFloatingCircle()
                 .overlay(alignment: .topTrailing) {
                     if count > 1 {
                         Text("\(count)")
@@ -329,7 +328,7 @@ private struct ChatContent: View {
         .font(.system(size: 18))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .rstBar(classic: .ultraThinMaterial)
     }
 
     /// Другой чат (напоминание, карточка контакта); тот же — к сообщению.
@@ -442,7 +441,7 @@ private struct ChatContent: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(Theme.surface.opacity(0.92))
+            .rstBar(classic: Theme.surface.opacity(0.92))
         }
         .buttonStyle(.plain)
     }
@@ -605,8 +604,7 @@ private struct ChatContent: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Theme.onSurface)
                             .frame(width: 40, height: 40)
-                            .background(Circle().fill(Theme.card))
-                            .overlay(Circle().stroke(Theme.outline))
+                            .rstFloatingCircle()
                     }
                     .padding(14)
                 }
