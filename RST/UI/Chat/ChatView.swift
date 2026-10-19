@@ -74,6 +74,8 @@ private struct ChatContent: View {
     @State private var viewOnceVideo: URL?
     @Environment(AppModel.self) private var app
     @State private var confetti = false
+    @State private var exported: ExportedFile?
+    @State private var exporting = false
     /// Идёт запись или трансляция экрана — защищённый чат прячется.
     @State private var screenCaptured = UIScreen.main.isCaptured
 
@@ -118,6 +120,7 @@ private struct ChatContent: View {
         }
         .sheet(isPresented: $showScheduled) { ScheduledListSheet(model: model) }
         .sheet(item: $stickerSetRef) { StickerSetSheet(ref: $0) }
+        .sheet(item: $exported) { ShareSheet(items: [$0.url]) }
         .sheet(item: $commentsOf) { post in
             CommentsSheet(chatId: model.chatId, post: post, canModerate: ["owner", "admin"].contains(model.myRole))
         }
@@ -158,6 +161,10 @@ private struct ChatContent: View {
                     }
                     if !(store.chat(model.chatId)?.isSystem ?? false) {
                         Button { showTimer = true } label: { Label("Автоудаление", systemImage: "timer") }
+                    }
+                    if !model.isProtected {
+                        Button { exportChat() } label: { Label("Экспорт переписки", systemImage: "square.and.arrow.up") }
+                            .disabled(exporting)
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -240,6 +247,22 @@ private struct ChatContent: View {
                             .offset(x: 4, y: -4)
                     }
                 }
+        }
+    }
+
+    /// Экспорт переписки текстом: история целиком, расшифровка на устройстве.
+    private func exportChat() {
+        exporting = true
+        model.toast = "Собираю историю переписки…"
+        Task {
+            defer { exporting = false }
+            do {
+                let url = try await ChatExport.export(chatId: model.chatId, title: store.title(for: model.chatId), services: services)
+                model.toast = nil
+                exported = ExportedFile(url: url)
+            } catch {
+                model.toast = errorText(error)
+            }
         }
     }
 
