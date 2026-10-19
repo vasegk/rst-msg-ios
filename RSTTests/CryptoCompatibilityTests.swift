@@ -73,6 +73,8 @@ final class CryptoCompatibilityTests: XCTestCase {
     func testOwnPackedHasWebFormat() throws {
         let key = SymmetricKey(data: Data(base64Encoded: sharedRaw)!)
         let packed = try RstCrypto.encryptToPacked(key: key, plaintext: "привет, мир")
+        // Веб узнаёт шифротекст по началу строки (crypto.js: startsWith('{"iv":'))
+        XCTAssertTrue(packed.hasPrefix(#"{"iv":""#), packed)
         let object = try JSONSerialization.jsonObject(with: Data(packed.utf8)) as? [String: String]
         XCTAssertEqual(Set(object?.keys.map { $0 } ?? []), ["iv", "ciphertext"])
         XCTAssertEqual(Data(base64Encoded: object?["iv"] ?? "")?.count, 12)

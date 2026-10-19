@@ -177,7 +177,11 @@ struct PackedCiphertext: Codable, Equatable {
     let iv: String
     let ciphertext: String
 
-    var json: String { JSONCoding.encodeString(self) }
+    /// Порядок полей важен: веб узнаёт шифротекст по началу строки
+    /// `{"iv":` (crypto.js, decryptText), а JSONEncoder порядок ключей не
+    /// обещает — с `{"ciphertext":…}` браузер показывал сообщение как есть.
+    /// Base64 экранирования в JSON не требует, поэтому собираем вручную.
+    var json: String { #"{"iv":""# + iv + #"","ciphertext":""# + ciphertext + #""}"# }
 
     /// nil, если строка не похожа на упакованный шифротекст.
     ///
