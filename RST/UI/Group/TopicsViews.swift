@@ -235,7 +235,7 @@ struct TopicsListView: View {
                     Text(t.title).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     if t.closed == true { Image(systemName: "lock.fill").font(.system(size: 11)).foregroundStyle(Theme.muted) }
                     Spacer()
-                    Text(TimeFormat.listTime(ServerTime.parse(t.lastMsg?.createdAt)))
+                    Text(TimeFormat.listTime(ServerTime.parse(t.lastTime ?? t.lastMsg?.createdAt)))
                         .font(.system(size: 12)).foregroundStyle(Theme.muted)
                 }
                 HStack {

@@ -159,6 +159,7 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual(topics[1].topic, ForumTopic(id: 7, title: "Игры", icon: "🎮", closed: true, general: false))
         XCTAssertEqual(topics[1].lastMsg?.id, 55)
         XCTAssertEqual(topics[1].unread, 3)
+        XCTAssertEqual(topics[1].lastTime, "2026-10-19T10:00:00")
         XCTAssertEqual(CommentsSheet.countText(21), "21 комментарий")
         XCTAssertEqual(CommentsSheet.countText(5), "5 комментариев")
     }
