@@ -53,9 +53,9 @@ final class MessageRepository {
     static let groupPrefix = "group_"
     static let quoteMax = 500
 
-    private let api: RstApi
+    let api: RstApi
     private let session: SessionStore
-    private let socket: RstWebSocket
+    let socket: RstWebSocket
     private let userKeys: UserKeyRepository
     private let groupKeys: GroupKeyRepository
     private let keyCache: ChatKeyCache
@@ -146,7 +146,7 @@ final class MessageRepository {
         return false
     }
 
-    private func sendKeys(for chatId: String) async throws -> ChatKeys {
+    func sendKeys(for chatId: String) async throws -> ChatKeys {
         let keys = try await keys(for: chatId)
         if keys.isKeyPending { throw GroupKeyPendingError() }
         return keys

@@ -181,6 +181,13 @@ final class RstApi {
 
     func chatTimer(_ chatId: String) async throws -> ChatTimerResponse { try await get("/api/chats/timer?chat=\(queryEncoded(chatId))") }
 
+    /// Отложенные (и напоминания, и «когда будет в сети») этого чата.
+    func scheduled(chat: String) async throws -> ScheduledResponse { try await get("/api/scheduled?chat=\(queryEncoded(chat))") }
+
+    func deleteScheduled(id: Int64) async throws { try await send("DELETE", "/api/scheduled/\(id)", Optional<EmptyBody>.none) }
+
+    func sendScheduledNow(id: Int64) async throws { try await send("POST", "/api/scheduled/\(id)/send_now", EmptyBody()) }
+
     func drafts() async throws -> DraftsResponse { try await get("/api/drafts") }
 
     func putDraft(chat: String, content: String) async throws { try await send("PUT", "/api/drafts", DraftPutRequest(chat: chat, content: content)) }

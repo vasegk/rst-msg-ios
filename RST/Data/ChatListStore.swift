@@ -21,6 +21,8 @@ final class ChatListStore {
     var lastServerError: String?
     /// Открытый на экране чат: ему не прибавляем непрочитанное.
     var activeChatId: String?
+    /// «Ответить в другом чате»: цитата, которую понесёт первое сообщение в этот чат.
+    var crossReplyDraft: [String: CrossReply] = [:]
     private(set) var outboxVersion = 0
 
     private let api: RstApi

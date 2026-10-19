@@ -87,6 +87,15 @@ struct MessageTextView: View {
                 piece.foregroundColor = isMine ? .white : Theme.accent
                 if isMine { piece.font = font.bold() }
             }
+            if s.contains(.hashtag), let tag = run.data {
+                // #тег — поиск по чату
+                var comps = URLComponents()
+                comps.scheme = "rstmsg"
+                comps.host = "hashtag"
+                comps.queryItems = [URLQueryItem(name: "t", value: tag)]
+                piece.link = comps.url
+                piece.foregroundColor = isMine ? .white : Theme.accent
+            }
             out += piece
         }
         return out

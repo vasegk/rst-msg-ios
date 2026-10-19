@@ -15,12 +15,30 @@ struct ComposerView: View {
     @State private var recorder = VoiceRecorder()
     /// Выбрано одно фото/видео — спросить: обычное, под спойлером, одноразовое.
     @State private var singleVisual: ChatViewModel.OutgoingFile?
+    @State private var showSchedule = false
+    @State private var showContactPicker = false
     @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             if let reply = model.replyTo { contextBar(title: "Ответ: \(store.displayName(reply.sender))", text: Previews.describe(reply), icon: "arrowshape.turn.up.left.fill") }
             if let edit = model.editing { contextBar(title: "Изменение", text: Previews.describe(edit), icon: "pencil") }
+            if let cross = store.crossReplyDraft[model.chatId] {
+                // Ответ на сообщение из другого чата: цитату понесёт первое сообщение
+                HStack(spacing: 10) {
+                    Image(systemName: "arrowshape.turn.up.left.2.fill").foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(cross.author) · \(cross.chatName.isEmpty ? "из другого чата" : cross.chatName)")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.accent)
+                        Text(Previews.oneLine(TextFormat.strip(cross.text))).font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    Spacer()
+                    Button { store.crossReplyDraft[model.chatId] = nil } label: { Image(systemName: "xmark").foregroundStyle(Theme.muted) }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Theme.surface.opacity(0.95))
+            }
 
             if !model.canWrite {
                 Text(blockedText)
@@ -45,6 +63,14 @@ struct ComposerView: View {
             if case .success(let urls) = result { Task { await sendFiles(urls) } }
         }
         .sheet(isPresented: $showPoll) { PollComposer(model: model) }
+        .sheet(isPresented: $showSchedule) {
+            TimePickerSheet(title: "Отправить позже") { date in model.scheduleCurrent(at: date) }
+        }
+        .sheet(isPresented: $showContactPicker) {
+            ChatPickerSheet(title: "Контакт", peopleOnly: true) { chat in
+                model.shareContact(ContactRef(username: chat.chatId, name: chat.title))
+            }
+        }
         .confirmationDialog("Отправить", isPresented: Binding(
             get: { singleVisual != nil }, set: { if !$0 { singleVisual = nil } }), titleVisibility: .hidden) {
             Button("Отправить") { sendSingle() }
@@ -97,6 +123,7 @@ struct ComposerView: View {
             Menu {
                 Button { showPhotos = true } label: { Label("Фото или видео", systemImage: "photo.on.rectangle") }
                 Button { showFiles = true } label: { Label("Файл", systemImage: "doc") }
+                Button { showContactPicker = true } label: { Label("Контакт", systemImage: "person.crop.circle") }
                 if model.isGroup || !model.isSaved {
                     Button { showPoll = true } label: { Label("Опрос", systemImage: "chart.bar.xaxis") }
                 }
@@ -140,6 +167,15 @@ struct ComposerView: View {
                     }
                 }
                 .disabled(model.sending)
+                // Удержание «Отправить» — отложить или «когда будет в сети»
+                .contextMenu {
+                    if model.editing == nil {
+                        Button { showSchedule = true } label: { Label("Отправить позже", systemImage: "clock") }
+                        if model.canSendWhenOnline {
+                            Button { model.sendWhenOnline() } label: { Label("Когда будет в сети", systemImage: "person.badge.clock") }
+                        }
+                    }
+                }
             }
         }
         .padding(.horizontal, 10)

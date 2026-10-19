@@ -17,7 +17,7 @@ import Foundation
 enum TextFormat {
 
     enum Style: Int, CaseIterable, Hashable {
-        case bold, italic, underline, strike, spoiler, code, link, mention
+        case bold, italic, underline, strike, spoiler, code, link, mention, hashtag
     }
 
     struct Run: Equatable {
@@ -54,6 +54,7 @@ enum TextFormat {
         case link(labelTagged: String, url: String)
         case bareLink(String)
         case mention(String)
+        case hashtag(String)
     }
 
     private static func re(_ pattern: String) -> NSRegularExpression {
@@ -79,6 +80,8 @@ enum TextFormat {
     /// @ник латиницей и @все/@онлайн (без продолжения буквой — «@всем» не упоминание).
     private static let mentionRE = re(#"(^|\s)@([a-zA-Z0-9_-]+|все(?![\p{L}\p{N}_-])|онлайн(?![\p{L}\p{N}_-]))"#)
     private static let stashRE = re(#"\u0000(\d+)\u0000"#)
+    /// #тег: после пробела или в начале строки; внутри слова и в ссылке — не тег.
+    private static let hashtagRE = re(#"(^|\s)#([\p{L}\p{N}_]{1,64})(?![\p{L}\p{N}_])"#)
 
     // MARK: - Разбор
 
@@ -104,6 +107,7 @@ enum TextFormat {
             return keep(.bareLink(url)) + tail
         }
         s = replace(s, mentionRE) { g in g[1] + keep(.mention(g[2])) }
+        s = replace(s, hashtagRE) { g in g[1] + keep(.hashtag(g[2])) }
 
         // 3. Стили
         s = applyStyles(s)
@@ -366,6 +370,8 @@ enum TextFormat {
             builder.append(url, extra: .link, data: url)
         case .mention(let name):
             builder.append("@" + name, extra: .mention, data: name)
+        case .hashtag(let tag):
+            builder.append("#" + tag, extra: .hashtag, data: tag)
         case .link(let labelTagged, let url):
             // Слова ссылки могут содержать стили и код — раскрываем вложенное
             let inner = RichBuilder()

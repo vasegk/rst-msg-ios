@@ -20,6 +20,8 @@ struct MessageRow: View {
     var onOpenChat: (String, Int64) -> Void = { _, _ in }
     var onShowEdits: (ChatMessage) -> Void = { _ in }
     var onOpenViewOnce: (ChatMessage) -> Void = { _ in }
+    var onAction: (MessageAction) -> Void = { _ in }
+    @State private var swipe: CGFloat = 0
 
     @Environment(ChatListStore.self) private var store
     @Environment(\.openURL) private var openURL
@@ -39,6 +41,12 @@ struct MessageRow: View {
                 .padding(.vertical, 4)
         } else {
             HStack(alignment: .bottom, spacing: 8) {
+                if model.selecting {
+                    Image(systemName: model.selected.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22))
+                        .foregroundStyle(model.selected.contains(message.id) ? Theme.accent : Theme.muted)
+                        .padding(.bottom, 6)
+                }
                 if message.isMine { Spacer(minLength: 50) }
                 if isGroup && !message.isMine && !isChannel {
                     if showAvatar {
@@ -62,8 +70,25 @@ struct MessageRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.top, showSender ? 6 : 1)
-            .background(highlighted ? Theme.accent.opacity(0.25) : Color.clear)
+            .background(highlighted || model.selected.contains(message.id) ? Theme.accent.opacity(0.22) : Color.clear)
             .animation(.easeOut(duration: 0.6), value: highlighted)
+            .offset(x: swipe)
+            .contentShape(Rectangle())
+            // В режиме выделения нажатие отмечает сообщение
+            .onTapGesture { if model.selecting { model.toggleSelection(message) } }
+            // Ответ свайпом влево
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { v in
+                        guard !model.selecting, model.canWrite, !message.pending,
+                              abs(v.translation.width) > abs(v.translation.height) else { return }
+                        swipe = max(-70, min(0, v.translation.width))
+                    }
+                    .onEnded { _ in
+                        if swipe <= -55 { model.startReply(message) }
+                        withAnimation(.spring(response: 0.25)) { swipe = 0 }
+                    }
+            )
         }
     }
 
@@ -169,6 +194,9 @@ struct MessageRow: View {
             } else if !message.text.isEmpty && !isServiceCaption && !isFileNameCaption {
                 MessageTextView(text: message.text, isMine: message.isMine)
                     .environment(\.openURL, OpenURLAction { url in handleLink(url) })
+                if message.attachment == nil, let link = LinkPreviewCard.firstLink(in: message.text) {
+                    LinkPreviewCard(url: link, isMine: message.isMine)
+                }
             }
         }
     }
@@ -240,6 +268,20 @@ struct MessageRow: View {
             if model.canWrite {
                 Button { model.startReply(message) } label: { Label("Ответить", systemImage: "arrowshape.turn.up.left") }
             }
+            // Защищённая группа: без ответа в другом чате, лично и напоминаний
+            if !model.isProtected && !message.viewOnce && !message.undecryptable {
+                Button { onAction(.crossReply(message)) } label: {
+                    Label("Ответить в другом чате", systemImage: "arrowshape.turn.up.left.2")
+                }
+                if model.isGroup && !message.isMine && !isChannel {
+                    Button { onAction(.replyPrivately(message)) } label: { Label("Ответить лично", systemImage: "person.fill") }
+                }
+                Button { onAction(.remind(message)) } label: { Label("Напомнить", systemImage: "bell") }
+            }
+            Button { onAction(.select(message)) } label: { Label("Выбрать", systemImage: "checkmark.circle") }
+            if model.isGroup && message.isMine {
+                Button { onAction(.readers(message)) } label: { Label("Кто прочитал", systemImage: "eye") }
+            }
         }
         // Защищённая группа и одноразовые: без копирования и пересылки
         if !message.text.isEmpty && !message.undecryptable && !model.isProtected && !message.viewOnce {
@@ -289,6 +331,11 @@ struct MessageRow: View {
                 // @все/@онлайн — подсветка без перехода в профиль
                 let name = url.lastPathComponent
                 if !Mentions.special.contains(name.lowercased()) { onOpenProfile(name) }
+                return .handled
+            }
+            if url.host == "hashtag",
+               let tag = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                onAction(.hashtag(tag))
                 return .handled
             }
             if url.host == "confirm",

@@ -23,11 +23,14 @@ final class ChatViewModel {
     private(set) var text = ""
     var toast: String?
     var sending = false
+    /// Режим выделения: выбранные сообщения.
+    var selected: Set<Int64> = []
+    var selecting = false
     /// Прокрутить к сообщению (ответ, закреп).
     var scrollTarget: Int64?
     var highlighted: Int64?
 
-    @ObservationIgnored private let services: Services
+    @ObservationIgnored let services: Services
     @ObservationIgnored private var subscription: UUID?
     @ObservationIgnored private var oldestId: Int64?
     @ObservationIgnored private var lastGroupRead: Int64 = 0
@@ -339,7 +342,11 @@ final class ChatViewModel {
                 if let editTarget {
                     try await services.messages.edit(chatId, message: editTarget, newText: body)
                 } else {
-                    try await services.messages.sendText(chatId, text: body, replyTo: reply?.id)
+                    // Первое сообщение после «Ответить в другом чате» несёт цитату x
+                    let cross = services.chats.crossReplyDraft[chatId]
+                    try await services.messages.sendText(chatId, text: body, replyTo: cross == nil ? reply?.id : nil,
+                                                         crossReply: cross)
+                    services.chats.crossReplyDraft[chatId] = nil
                 }
                 updateText("")
                 replyTo = nil

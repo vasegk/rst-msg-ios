@@ -652,6 +652,28 @@ struct ReadersResponse: Decodable {
     let total: Int?
 }
 
+/// Отложенное сообщение: send_at — ISO с Z; reminder — напоминание в
+/// Избранное; when_online — уйдёт, когда собеседник появится в сети.
+struct ScheduledDto: Decodable, Identifiable, Equatable {
+    let id: Int64
+    let receiver: String?
+    let content: String?
+    let fileUrl: String?
+    let fileType: String?
+    let sendAt: String?
+    let reminder: Bool?
+    let whenOnline: Bool?
+    enum CodingKeys: String, CodingKey {
+        case id, receiver, content, reminder
+        case fileUrl = "file_url"
+        case fileType = "file_type"
+        case sendAt = "send_at"
+        case whenOnline = "when_online"
+    }
+}
+
+struct ScheduledResponse: Decodable { let scheduled: [ScheduledDto]? }
+
 struct ClearChatRequest: Encodable {
     let user1: String
     let user2: String

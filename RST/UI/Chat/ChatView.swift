@@ -52,6 +52,13 @@ private struct ChatContent: View {
     @State private var pinnedIndex = 0
     @State private var nearBottom = true
     @State private var editsOf: ChatMessage?
+    @State private var remindOf: ChatMessage?
+    @State private var crossReplyOf: ChatMessage?
+    @State private var readersOf: ChatMessage?
+    @State private var searchQuery: String?
+    @State private var showScheduled = false
+    @State private var showTimer = false
+    @State private var forwardingSelection = false
     @State private var viewOnceImage: UIImage?
     @State private var viewOnceVideo: URL?
     @Environment(AppModel.self) private var app
@@ -76,7 +83,33 @@ private struct ChatContent: View {
             } else {
                 messagesList
             }
-            ComposerView(model: model)
+            if model.selecting {
+                selectionBar
+            } else {
+                ComposerView(model: model)
+            }
+        }
+        .sheet(item: $remindOf) { message in
+            TimePickerSheet(title: "Напомнить") { date in model.remind(message, at: date) }
+        }
+        .sheet(item: $crossReplyOf) { message in
+            ChatPickerSheet(title: "Ответить в чате", exclude: [model.chatId]) { chat in
+                model.prepareCrossReply(message, to: chat.chatId)
+                app.pendingChat = chat.chatId
+            }
+        }
+        .sheet(item: $readersOf) { message in
+            ReadersSheet(model: model, message: message).presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: Binding(get: { searchQuery != nil }, set: { if !$0 { searchQuery = nil } })) {
+            ChatSearchSheet(model: model, query: searchQuery ?? "") { id in model.jump(to: id) }
+        }
+        .sheet(isPresented: $showScheduled) { ScheduledListSheet(model: model) }
+        .sheet(isPresented: $showTimer) { ChatTimerSheet(model: model) }
+        .sheet(isPresented: $forwardingSelection) {
+            ChatPickerSheet(title: "Переслать \(model.selected.count)") { chat in
+                Task { _ = await model.forwardSelected(to: chat.chatId) }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
             screenCaptured = UIScreen.main.isCaptured
@@ -94,6 +127,19 @@ private struct ChatContent: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) { header }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { searchQuery = "" } label: { Label("Поиск в переписке", systemImage: "magnifyingglass") }
+                    Button { showScheduled = true } label: {
+                        Label(model.isSaved ? "Напоминания" : "Отложенные", systemImage: "clock")
+                    }
+                    if !(store.chat(model.chatId)?.isSystem ?? false) {
+                        Button { showTimer = true } label: { Label("Автоудаление", systemImage: "timer") }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { openInfo() } label: {
                     AvatarView(name: model.title, url: store.chat(model.chatId)?.avatarUrl, size: 34,
@@ -146,6 +192,47 @@ private struct ChatContent: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func handle(_ action: MessageAction) {
+        switch action {
+        case .select(let m): model.startSelection(m)
+        case .remind(let m): remindOf = m
+        case .crossReply(let m): crossReplyOf = m
+        case .replyPrivately(let m):
+            // Лично автору — цитатой из группы
+            model.prepareCrossReply(m, to: m.sender)
+            app.pendingChat = m.sender
+        case .readers(let m): readersOf = m
+        case .hashtag(let tag): searchQuery = "#" + tag
+        }
+    }
+
+    /// Панель выделения: переслать, удалить, отмена.
+    private var selectionBar: some View {
+        HStack(spacing: 18) {
+            Button("Отмена") { model.clearSelection() }
+            Spacer()
+            Text("Выбрано: \(model.selected.count)").font(.system(size: 15, weight: .semibold))
+            Spacer()
+            if !model.isProtected {
+                Button { forwardingSelection = true } label: { Image(systemName: "arrowshape.turn.up.right") }
+                    .disabled(model.selected.isEmpty)
+            }
+            Menu {
+                if model.canDeleteSelectedForEveryone {
+                    Button(role: .destructive) { model.deleteSelected(forEveryone: true) } label: { Label("Удалить у всех", systemImage: "trash") }
+                }
+                Button(role: .destructive) { model.deleteSelected(forEveryone: false) } label: { Label("Удалить у себя", systemImage: "trash.slash") }
+            } label: {
+                Image(systemName: "trash").foregroundStyle(Theme.danger)
+            }
+            .disabled(model.selected.isEmpty)
+        }
+        .font(.system(size: 18))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
     }
 
     /// Другой чат (напоминание, карточка контакта); тот же — к сообщению.
@@ -360,7 +447,8 @@ private struct ChatContent: View {
                                        onConfirmLink: { linkToConfirm = $0 },
                                        onOpenChat: { chat, messageId in openChat(chat, messageId) },
                                        onShowEdits: { editsOf = $0 },
-                                       onOpenViewOnce: { openViewOnce($0) })
+                                       onOpenViewOnce: { openViewOnce($0) },
+                                       onAction: { handle($0) })
                                 .id(item.id)
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                         case .album(let list, let showSender, let showAvatar):
