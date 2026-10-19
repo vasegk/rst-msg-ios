@@ -35,6 +35,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Камера нужна, чтобы снимать фото и видео для отправки в чат.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Геопозиция нужна, чтобы отправить своё место в чат или делиться им в реальном времени.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Микрофон нужен для голосовых сообщений.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

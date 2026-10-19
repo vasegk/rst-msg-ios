@@ -17,6 +17,8 @@ struct ComposerView: View {
     @State private var singleVisual: ChatViewModel.OutgoingFile?
     @State private var showSchedule = false
     @State private var showContactPicker = false
+    @State private var showLocation = false
+    @Environment(Services.self) private var services
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -66,6 +68,15 @@ struct ComposerView: View {
         .sheet(isPresented: $showSchedule) {
             TimePickerSheet(title: "Отправить позже") { date in model.scheduleCurrent(at: date) }
         }
+        .confirmationDialog("Местоположение", isPresented: $showLocation, titleVisibility: .visible) {
+            Button("Отправить текущее место") { shareLocation(duration: 0) }
+            Button("Делиться 15 минут") { shareLocation(duration: 15 * 60) }
+            Button("Делиться 1 час") { shareLocation(duration: 3600) }
+            Button("Делиться 8 часов") { shareLocation(duration: 8 * 3600) }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Трансляция идёт, пока приложение открыто.")
+        }
         .sheet(isPresented: $showContactPicker) {
             ChatPickerSheet(title: "Контакт", peopleOnly: true) { chat in
                 model.shareContact(ContactRef(username: chat.chatId, name: chat.title))
@@ -80,6 +91,22 @@ struct ComposerView: View {
                 Button("Одноразовое: откроют один раз") { sendSingle(viewOnce: true) }
             }
             Button("Отмена", role: .cancel) { singleVisual = nil }
+        }
+    }
+
+    /// 0 — одна точка; иначе трансляция на столько секунд.
+    private func shareLocation(duration: TimeInterval) {
+        let chatId = model.chatId
+        Task {
+            do {
+                if duration == 0 {
+                    try await LiveLocationSharing.shared.sendCurrent(chatId: chatId, services: services)
+                } else {
+                    try await LiveLocationSharing.shared.start(chatId: chatId, duration: duration, services: services)
+                }
+            } catch {
+                model.toast = errorText(error)
+            }
         }
     }
 
@@ -124,6 +151,7 @@ struct ComposerView: View {
                 Button { showPhotos = true } label: { Label("Фото или видео", systemImage: "photo.on.rectangle") }
                 Button { showFiles = true } label: { Label("Файл", systemImage: "doc") }
                 Button { showContactPicker = true } label: { Label("Контакт", systemImage: "person.crop.circle") }
+                Button { showLocation = true } label: { Label("Местоположение", systemImage: "location") }
                 if model.isGroup || !model.isSaved {
                     Button { showPoll = true } label: { Label("Опрос", systemImage: "chart.bar.xaxis") }
                 }

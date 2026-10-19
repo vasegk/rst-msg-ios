@@ -188,6 +188,11 @@ struct MessageRow: View {
             }
             if let live = message.live {
                 LiveLocationCard(geo: live, isMine: message.isMine)
+                if message.isMine && LiveLocationSharing.shared.isSharing(messageId: message.id) {
+                    Button("Остановить") { LiveLocationSharing.shared.stop(messageId: message.id) }
+                        .font(.system(size: 14, weight: .semibold))
+                        .buttonStyle(.plain)
+                }
             }
             if let contact = message.contact {
                 ContactCard(contact: contact, isMine: message.isMine) { onOpenChat(contact.username, 0) }

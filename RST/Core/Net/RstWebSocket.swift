@@ -408,6 +408,12 @@ final class RstWebSocket {
         return sendObject(obj)
     }
 
+    /// Новая точка трансляции: только автор, не чаще раза в 3 с; сервер
+    /// подменяет содержимое без «изменено».
+    func sendLiveLocation(messageId: Int64, content: String) -> Bool {
+        sendObject(["action": .string("live_location"), "message_id": .number(Double(messageId)), "content": .string(content)])
+    }
+
     /// Чек-лист: отметить или снять пункт (кем бы ни был отмечен).
     func sendCheckToggle(messageId: Int64, option: Int) -> Bool {
         sendObject(["action": .string("check_toggle"), "message_id": .number(Double(messageId)), "option": .number(Double(option))])
