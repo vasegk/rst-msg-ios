@@ -14,10 +14,20 @@ struct EncryptedImageView: View {
     @Environment(Services.self) private var services
     @State private var image: UIImage?
     @State private var failed = false
+    /// Автозагрузка выключена (или не Wi-Fi) — ждём нажатия.
+    @State private var waiting = false
 
     var body: some View {
         Group {
-            if let image {
+            if waiting {
+                Button {
+                    waiting = false
+                    Task { await load(manual: true) }
+                } label: {
+                    placeholder(icon: "arrow.down.circle", text: "Фото · нажмите, чтобы загрузить")
+                }
+                .buttonStyle(.plain)
+            } else if let image {
                 let size = fitted(image.size)
                 Image(uiImage: image)
                     .resizable()
@@ -45,7 +55,11 @@ struct EncryptedImageView: View {
         return CGSize(width: max(120, size.width * scale), height: max(80, size.height * scale))
     }
 
-    private func load() async {
+    private func load(manual: Bool = false) async {
+        if !manual && !ChatAppearance.shared.shouldAutoLoadPhotos && services.attachments.existingFileURL(for: attachment) == nil {
+            waiting = true
+            return
+        }
         do {
             let data = try await services.attachments.data(for: attachment)
             let decoded = await Task.detached(priority: .userInitiated) { () -> UIImage? in

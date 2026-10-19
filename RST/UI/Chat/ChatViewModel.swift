@@ -412,7 +412,7 @@ final class ChatViewModel {
 
         /// Фото перед отправкой — JPEG до 2560 по длинной стороне, как в вебе.
         func prepared() -> OutgoingFile {
-            guard compress, mimeType.hasPrefix("image/"), mimeType != "image/gif",
+            guard compress, ChatAppearance.shared.compressPhotos, mimeType.hasPrefix("image/"), mimeType != "image/gif",
                   let jpeg = AttachmentRepository.compressImage(data) else { return self }
             let stem = (fileName as NSString).deletingPathExtension
             return OutgoingFile(data: jpeg, fileName: (stem.isEmpty ? "photo" : stem) + ".jpg", mimeType: "image/jpeg", compress: false)

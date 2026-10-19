@@ -3,8 +3,11 @@ import UIKit
 
 /// Палитра веб-клиента (css/variables.css). Цвета зависят от темы.
 enum Theme {
-    static let accent = Color(hex: 0xF57C00)
-    static let accentLight = Color(hex: 0xE65100)
+    /// Цвет оформления — из настроек чатов (12 готовых или свой).
+    static var accent: Color { ChatAppearance.shared.accent }
+    static var accentLight: Color {
+        ChatAppearance.shared.isDefaultAccent ? Color(hex: 0xE65100) : ChatAppearance.shared.accentLight
+    }
     static let danger = Color(hex: 0xFF4A5A)
     static let success = Color(hex: 0x00E676)
     static let verified = Color(hex: 0x3897F0)
@@ -19,8 +22,14 @@ enum Theme {
     static let outline = Color(UIColor { $0.userInterfaceStyle == .dark
         ? UIColor(white: 1, alpha: 0.07) : UIColor(white: 0, alpha: 0.06) })
 
-    /// Своё сообщение — градиент 135° (#E65100 → #FF7043 в тёмной теме).
-    static let ownBubble = LinearGradient(
+    /// Своё сообщение — градиент 135° (#E65100 → #FF7043 в тёмной теме);
+    /// со своим цветом оформления — от него к «светлее».
+    static var ownBubble: LinearGradient {
+        let look = ChatAppearance.shared
+        if look.isDefaultAccent { return defaultOwnBubble }
+        return LinearGradient(colors: [look.accent, look.accentLight], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    private static let defaultOwnBubble = LinearGradient(
         colors: [dynamic(dark: 0xE65100, light: 0xF57C00), dynamic(dark: 0xFF7043, light: 0xFF9800)],
         startPoint: .topLeading, endPoint: .bottomTrailing)
 

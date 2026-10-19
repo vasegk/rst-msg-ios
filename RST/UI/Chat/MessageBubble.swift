@@ -101,7 +101,7 @@ struct MessageRow: View {
                 PlainImageView(fileUrl: sticker, size: 150)
                 footer.padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(Color.black.opacity(0.35)))
             }
-            .onTapGesture(count: 2) { model.react(message, "👍") }
+            .onTapGesture(count: 2) { model.react(message, ChatAppearance.shared.quickReaction) }
             .onTapGesture { onAction(.stickerSet(sticker)) }
         } else {
             VStack(alignment: .leading, spacing: 6) {
@@ -173,7 +173,7 @@ struct MessageRow: View {
             .background(bubbleBackground)
             .clipShape(BubbleShape(isMine: message.isMine))
             .frame(maxWidth: 320, alignment: message.isMine ? .trailing : .leading)
-            .onTapGesture(count: 2) { if !message.pending { model.react(message, "👍") } }
+            .onTapGesture(count: 2) { if !message.pending { model.react(message, ChatAppearance.shared.quickReaction) } }
         }
     }
 
@@ -218,7 +218,7 @@ struct MessageRow: View {
             } else if !message.text.isEmpty && !isServiceCaption && !isFileNameCaption {
                 MessageTextView(text: message.text, isMine: message.isMine)
                     .environment(\.openURL, OpenURLAction { url in handleLink(url) })
-                if message.attachment == nil, let link = LinkPreviewCard.firstLink(in: message.text) {
+                if message.attachment == nil, ChatAppearance.shared.linkPreviews, let link = LinkPreviewCard.firstLink(in: message.text) {
                     LinkPreviewCard(url: link, isMine: message.isMine)
                 }
             }

@@ -145,7 +145,7 @@ private struct ChatContent: View {
         .fullScreenCover(isPresented: Binding(get: { viewOnceVideo != nil }, set: { if !$0 { closeViewOnceVideo() } })) {
             if let viewOnceVideo { VideoPlayerScreen(url: viewOnceVideo) }
         }
-        .background(AppBackground())
+        .background(ChatWallpaper())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) { header }

@@ -190,4 +190,15 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual(list.count, 2)
         XCTAssertNil(list[0].setAt)
     }
+
+    /// Цвет оформления — формулы js/accent-colors.js (ярко-жёлтый становится оливковым #adad0b).
+    func testAccentMath() {
+        XCTAssertEqual(AccentMath.readable("#ffff00").hex, "#adad0b")
+        XCTAssertTrue(AccentMath.readable("#ffff00").darkened)
+        XCTAssertEqual(AccentMath.readable("#2f7ff0").hex, "#2f7ff0")
+        XCTAssertFalse(AccentMath.readable("#2f7ff0").darkened)
+        XCTAssertEqual(AccentMath.parse("#F57C00"), 0xF57C00)
+        XCTAssertNil(AccentMath.parse("orange"))
+        XCTAssertNotEqual(AccentMath.lighter("#2f7ff0"), "#2f7ff0")
+    }
 }

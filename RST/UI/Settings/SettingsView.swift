@@ -37,7 +37,8 @@ struct SettingsView: View {
             Section {
                 NavigationLink { PrivacySettingsView() } label: { Label("Конфиденциальность", systemImage: "hand.raised.fill") }
                 NavigationLink { NotificationSettingsView() } label: { Label("Уведомления", systemImage: "bell.fill") }
-                NavigationLink { AppearanceSettingsView() } label: { Label("Оформление", systemImage: "paintbrush.fill") }
+                NavigationLink { ChatSettingsView() } label: { Label("Настройки чатов", systemImage: "paintbrush.fill") }
+                NavigationLink { DataSettingsView() } label: { Label("Данные и память", systemImage: "internaldrive.fill") }
                 NavigationLink { FoldersSettingsView() } label: { Label("Папки с чатами", systemImage: "folder.fill") }
             }
 
@@ -367,29 +368,6 @@ struct NotificationSettingsView: View {
 }
 
 // MARK: - Оформление
-
-struct AppearanceSettingsView: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        Form {
-            Picker("Тема", selection: Binding(get: {
-                switch app.colorScheme {
-                case .light?: return "light"
-                case nil: return "system"
-                default: return "dark"
-                }
-            }, set: { app.setTheme($0) })) {
-                Text("Тёмная").tag("dark")
-                Text("Светлая").tag("light")
-                Text("Как в системе").tag("system")
-            }
-            .pickerStyle(.inline)
-        }
-        .navigationTitle("Оформление")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
 
 // MARK: - Папки
 

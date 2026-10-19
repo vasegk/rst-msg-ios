@@ -4,7 +4,7 @@ import SwiftUI
 struct MessageTextView: View {
     let text: String
     var isMine = false
-    var fontSize: CGFloat = 16
+    var fontSize: CGFloat = CGFloat(ChatAppearance.shared.textSize)
     @State private var spoilersRevealed = false
 
     private var blocks: [TextFormat.Block] { TextFormat.parse(text) }
