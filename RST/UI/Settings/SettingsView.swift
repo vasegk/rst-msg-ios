@@ -570,9 +570,15 @@ struct SessionsView: View {
     @State private var sessions: [SessionDto] = []
     @State private var message: String?
     @State private var confirm = false
+    @State private var approveQr = false
 
     var body: some View {
         List {
+            Section {
+                Button { approveQr = true } label: { Label("Подтвердить вход по QR-коду", systemImage: "qrcode.viewfinder") }
+            } footer: {
+                Text("На новом устройстве выберите «Войти по QR-коду» и отсканируйте код отсюда — пароль вводить не нужно.")
+            }
             Section {
                 ForEach(sessions) { s in
                     VStack(alignment: .leading, spacing: 3) {
@@ -595,6 +601,7 @@ struct SessionsView: View {
         }
         .navigationTitle("Устройства")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $approveQr) { QrApproveSheet(link: nil) }
         .task { await load() }
         .refreshable { await load() }
         .confirmationDialog("Завершить все другие сеансы?", isPresented: $confirm, titleVisibility: .visible) {

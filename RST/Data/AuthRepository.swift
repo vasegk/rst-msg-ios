@@ -74,6 +74,26 @@ final class AuthRepository {
         userKeys.clear()
     }
 
+    /// Вход по QR-коду: пароля у этого устройства нет, поэтому вместо KEK из
+    /// пароля — случайный ключ; приватный ключ пришёл от подтвердившего.
+    func finishQrLogin(_ poll: QrPollResponse, privateJwk: String) throws {
+        guard let token = poll.accessToken, let username = poll.username, let salt = poll.kdfSalt else {
+            throw CryptoError("Сервер не прислал данные входа")
+        }
+        let login = LoginResponse(username: username, originalUsername: poll.originalUsername, kdfSalt: salt,
+                                  kdfIterations: poll.kdfIterations, accessToken: token)
+        save(login, kek: RstCrypto.randomAesKey(), privateJwk: privateJwk)
+        userKeys.clear()
+    }
+
+    /// Подтвердить вход нового устройства своим приватным ключом.
+    func approveQrLogin(_ link: QrLogin.Link) async throws {
+        guard let jwk = session.privateKeyJwk else { throw CryptoError("На этом устройстве нет ключа шифрования — войдите заново") }
+        let sealed = try QrLogin.approve(privateJwk: jwk, peerPub: link.pub)
+        try await api.qrApprove(QrApproveRequest(session: link.session, pub: link.pub,
+                                                 approverPub: sealed.approverPub, payload: sealed.payload))
+    }
+
     /// Достаёт приватный ключ с сервера и расшифровывает KEK-ом. Если ключей
     /// на сервере нет вовсе (обрыв на регистрации) — создаём пару заново:
     /// переписки у такого пользователя ещё не было.

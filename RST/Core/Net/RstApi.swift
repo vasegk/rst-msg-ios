@@ -385,6 +385,21 @@ final class RstApi {
         try await send("DELETE", "/api/groups/\(path(groupNumber))/topics/\(id)", Optional<EmptyBody>.none)
     }
 
+    // MARK: - Вход по QR-коду (routers/qrlogin.py)
+
+    func qrStart(pub: String) async throws -> QrStartResponse { try await post("/api/qr/start", QrStartRequest(pub: pub), auth: false) }
+
+    /// 410 — код устарел.
+    func qrPoll(session: String, secret: String) async throws -> QrPollResponse {
+        try await post("/api/qr/poll", QrPollRequest(session: session, secret: secret), auth: false)
+    }
+
+    func qrInfo(session: String) async throws -> QrInfoResponse { try await get("/api/qr/" + path(session)) }
+
+    func qrApprove(_ request: QrApproveRequest) async throws { try await send("POST", "/api/qr/approve", request) }
+
+    func qrDeny(session: String) async throws { try await send("POST", "/api/qr/deny", QrSessionRequest(session: session)) }
+
     // MARK: - Стикеры (routers/stickers.py)
 
     /// Добавленные себе наборы (свои — тоже).

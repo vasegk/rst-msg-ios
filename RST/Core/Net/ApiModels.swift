@@ -1257,3 +1257,60 @@ struct AvatarHistoryItem: Decodable, Hashable {
 }
 
 struct AvatarsResponse: Decodable { let avatars: [AvatarHistoryItem]? }
+
+// MARK: - Вход по QR-коду (routers/qrlogin.py)
+
+struct QrStartRequest: Encodable { let pub: String }
+
+struct QrStartResponse: Decodable {
+    let session: String
+    let secret: String
+    let expiresIn: Int?
+    enum CodingKeys: String, CodingKey {
+        case session, secret
+        case expiresIn = "expires_in"
+    }
+}
+
+struct QrPollRequest: Encodable {
+    let session: String
+    let secret: String
+}
+
+/// pending / denied / approved (с токеном и ключом).
+struct QrPollResponse: Decodable {
+    let status: String
+    let username: String?
+    let originalUsername: String?
+    let kdfSalt: String?
+    let kdfIterations: Int?
+    let accessToken: String?
+    let payload: String?
+    let approverPub: String?
+    enum CodingKeys: String, CodingKey {
+        case status, username, payload
+        case originalUsername = "original_username"
+        case kdfSalt = "kdf_salt"
+        case kdfIterations = "kdf_iterations"
+        case accessToken = "access_token"
+        case approverPub = "approver_pub"
+    }
+}
+
+struct QrInfoResponse: Decodable {
+    let device: String?
+    let ip: String?
+}
+
+struct QrApproveRequest: Encodable {
+    let session: String
+    let pub: String
+    let approverPub: String
+    let payload: String
+    enum CodingKeys: String, CodingKey {
+        case session, pub, payload
+        case approverPub = "approver_pub"
+    }
+}
+
+struct QrSessionRequest: Encodable { let session: String }

@@ -416,4 +416,20 @@ final class CryptoCompatibilityTests: XCTestCase {
         XCTAssertFalse(AuthRepository.tokenExpired(token(exp: Date().timeIntervalSince1970 + 3600)))
         XCTAssertTrue(AuthRepository.tokenExpired("мусор"))
     }
+
+    /// Вход по QR-коду: ключ, отправленный подтверждающим, открывает только
+    /// новое устройство (его одноразовая пара), и ссылка из кода разбирается.
+    func testQrLoginRoundTrip() throws {
+        let device = P256.KeyAgreement.PrivateKey()
+        let pub = QrLogin.rawPublic(device.publicKey)
+        let account = Ecdh.generateKeyPair()
+        let sealed = try QrLogin.approve(privateJwk: account.privateJwkJson, peerPub: pub)
+        let opened = try QrLogin.open(mine: device, approverPub: sealed.approverPub, payload: sealed.payload)
+        XCTAssertEqual(opened, account.privateJwkJson)
+        XCTAssertThrowsError(try QrLogin.open(mine: P256.KeyAgreement.PrivateKey(), approverPub: sealed.approverPub, payload: sealed.payload))
+
+        let link = QrLogin.link(base: URL(string: "https://rst-msg.ru")!, session: "AbCdEfGhIjKlMnOpQrStUv", pub: pub)
+        XCTAssertEqual(QrLogin.parse(link), QrLogin.Link(session: "AbCdEfGhIjKlMnOpQrStUv", pub: pub))
+        XCTAssertNil(QrLogin.parse("https://rst-msg.ru/chat#qr=short.key"))
+    }
 }

@@ -239,6 +239,11 @@ final class AppModel {
     /// rstmsg://… и https://rst-msg.ru/… : приглашение в группу, профиль, чат.
     func open(url: URL) {
         let raw = url.absoluteString
+        // Код входа нового устройства (#qr=…): подтвердить — только вошедшим
+        if let qr = QrLogin.parse(raw) {
+            if phase == .loggedIn { qrApproval = qr }
+            return
+        }
         if let invite = InviteLink.parse(raw) {
             Task { await previewInvite(invite) }
             return
@@ -258,6 +263,8 @@ final class AppModel {
     var joinError: String?
     /// Набор стикеров, открытый по ссылке.
     var stickerLink: StickerSetRef?
+    /// Вход нового устройства по QR-коду ждёт подтверждения.
+    var qrApproval: QrLogin.Link?
     /// Короткое сообщение о заявке (отправлена, одобрена, отклонена).
     var joinNotice: String?
 

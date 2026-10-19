@@ -77,6 +77,7 @@ private struct LoginForm: View {
     @State private var password = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var showQr = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -96,9 +97,13 @@ private struct LoginForm: View {
             .buttonStyle(PrimaryButtonStyle())
             .disabled(busy || login.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
 
+            Button { showQr = true } label: {
+                Label("Войти по QR-коду", systemImage: "qrcode")
+            }
+            .font(.system(size: 15, weight: .medium))
+            .padding(.top, 4)
             Button("Забыли пароль? Войти по ключу восстановления") { mode = .recovery }
                 .font(.system(size: 14))
-                .padding(.top, 4)
             HStack(spacing: 4) {
                 Text("Нет аккаунта?").foregroundStyle(Theme.muted)
                 Button("Зарегистрироваться") { mode = .register }
@@ -106,6 +111,7 @@ private struct LoginForm: View {
             .font(.system(size: 15))
             .padding(.top, 8)
         }
+        .sheet(isPresented: $showQr) { QrLoginSheet() }
     }
 
     private func submit() {
