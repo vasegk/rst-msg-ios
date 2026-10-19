@@ -61,19 +61,7 @@ struct MainTabView: View {
         }
         .sheet(item: Binding(get: { app.stickerLink }, set: { app.stickerLink = $0 })) { StickerSetSheet(ref: $0) }
         .sheet(item: Binding(get: { app.qrApproval }, set: { app.qrApproval = $0 })) { QrApproveSheet(link: $0) }
-        // Звонок: окно на весь экран; свёрнутый — плашка сверху
-        .fullScreenCover(isPresented: Binding(
-            get: { services.calls.phase != .idle && !services.calls.minimized },
-            set: { if !$0 && services.calls.phase != .idle { services.calls.minimized = true } })) {
-            CallView()
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if services.calls.phase != .idle && services.calls.minimized { MinimizedCallBar() }
-        }
-        .alert(services.calls.notice ?? "", isPresented: Binding(
-            get: { services.calls.notice != nil }, set: { if !$0 { services.calls.notice = nil } })) {
-            Button("OK", role: .cancel) {}
-        }
+        .modifier(CallPresentation(calls: services.calls))
     }
 
     @ViewBuilder
@@ -90,6 +78,31 @@ struct MainTabView: View {
         case .groupInfo(let id): GroupInfoView(chatId: id)
         case .archive: ChatListView(archived: true)
         }
+    }
+}
+
+/// Звонок: окно на весь экран; свёрнутый — плашка сверху; итог — сообщением.
+private struct CallPresentation: ViewModifier {
+    let calls: CallService
+
+    private var fullScreen: Binding<Bool> {
+        Binding(get: { calls.phase != .idle && !calls.minimized },
+                set: { if !$0 && calls.phase != .idle { calls.minimized = true } })
+    }
+
+    private var noticeShown: Binding<Bool> {
+        Binding(get: { calls.notice != nil }, set: { if !$0 { calls.notice = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .fullScreenCover(isPresented: fullScreen) { CallView() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if calls.phase != .idle && calls.minimized { MinimizedCallBar() }
+            }
+            .alert(calls.notice ?? "", isPresented: noticeShown) {
+                Button("OK", role: .cancel) {}
+            }
     }
 }
 
