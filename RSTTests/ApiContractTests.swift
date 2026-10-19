@@ -205,16 +205,11 @@ final class ApiContractTests: XCTestCase {
 
     /// Экспорт переписки: запись как formatExportMessage в js/chat-export.js.
     func testChatExportFormat() {
-        var m = ChatMessage(id: 1, sender: "ivan", isMine: false, text: "Привет
-как дела", createdAt: nil)
+        var m = ChatMessage(id: 1, sender: "ivan", isMine: false, text: "Привет\nкак дела", createdAt: nil)
         m.forwardedFrom = "bob"
         m.isEdited = true
         let text = ChatExport.format(m) { $0 == "ivan" ? "Иван" : $0 }
-        XCTAssertEqual(text, "[] Иван:
-    (переслано от bob)
-    Привет
-    как дела
-    (изменено)")
+        XCTAssertEqual(text, "[] Иван:\n    (переслано от bob)\n    Привет\n    как дела\n    (изменено)")
         XCTAssertEqual(ChatExport.safeFilePart("Мой чат: тест"), "Мой_чат_тест")
         XCTAssertEqual(ChatExport.messagesWord(21), "сообщение")
     }

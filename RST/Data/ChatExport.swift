@@ -64,6 +64,64 @@ enum ChatExport {
         return result.isEmpty ? "chat" : result
     }
 
+    @MainActor
+    private static func collect(_ chatId: String, services: Services) async throws -> [ChatMessage] {
+        var pages: [[ChatMessage]] = []
+        var before: Int64?
+        for _ in 0..<maxPages {
+            let history = try await services.messages.history(chatId, beforeId: before, limit: page)
+            if !history.messages.isEmpty { pages.insert(history.messages, at: 0) }
+            guard history.hasMore, let first = history.oldestId ?? history.messages.first?.id else { break }
+            before = first
+        }
+        return pages.flatMap { $0 }.filter { !$0.undecryptable && !$0.isSystem }
+    }
+
+    /// Все переписки одним файлом — копия «на всякий случай». Чаты по
+    /// очереди; группы с запретом сохранения не попадают.
+    @MainActor
+    static func exportAll(services: Services) async throws -> URL {
+        let me = services.me
+        let myName = services.chats.myProfile?.displayName ?? me
+        let chats = services.chats
+        let name: (String) -> String = { $0 == me ? myName : chats.displayName($0) }
+        var ids = chats.chats.filter { !$0.isSystem && !$0.isDeleted && !$0.isProtected && $0.chatId != me }.map(\.chatId)
+        ids.append(me)
+        var parts: [String] = []
+        var total = 0
+        var skipped = 0
+        let line = String(repeating: "=", count: 60)
+        for chatId in ids {
+            let messages: [ChatMessage]
+            do {
+                messages = try await collect(chatId, services: services)
+            } catch {
+                skipped += 1
+                continue
+            }
+            guard !messages.isEmpty else { continue }
+            total += messages.count
+            let title = chats.title(for: chatId) + (MessageRepository.isGroup(chatId) ? " (группа)" : "")
+            let block = [line, "\(title) — \(messages.count) \(messagesWord(messages.count))", line, "",
+                         messages.map { format($0, name: name) }.joined(separator: "\n\n")]
+            parts.append(block.joined(separator: "\n"))
+        }
+        var summary = "Чатов: \(parts.count), сообщений: \(total)"
+        if skipped > 0 { summary += ", не удалось выгрузить: \(skipped)" }
+        let header = [
+            "Все переписки RST Messenger",
+            "Выгружено: \(when(Date())) пользователем \(myName)",
+            summary,
+            "Вложения в файл не входят - только их названия.",
+            "",
+        ].joined(separator: "\n")
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("RST_все-переписки_\(day.string(from: Date())).txt")
+        try Data(("\u{FEFF}" + header + "\n" + parts.joined(separator: "\n\n") + "\n").utf8).write(to: url, options: .atomic)
+        return url
+    }
+
     /// Вся история чата, расшифрованная и по порядку; файл во временной папке.
     @MainActor
     static func export(chatId: String, title: String, services: Services) async throws -> URL {

@@ -385,6 +385,9 @@ struct DataSettingsView: View {
     @State private var cacheBytes: Int64?
     @State private var confirmClear = false
     @State private var look = ChatAppearance.shared
+    @State private var exporting = false
+    @State private var exported: ExportedFile?
+    @State private var exportError: String?
 
     var body: some View {
         Form {
@@ -415,7 +418,21 @@ struct DataSettingsView: View {
             } footer: {
                 Text("Файлы снова скачаются и расшифруются, когда понадобятся. Переписка не пострадает.")
             }
+            Section {
+                Button(action: exportAll) {
+                    HStack {
+                        Text("Выгрузить все переписки")
+                        Spacer()
+                        if exporting { ProgressView() }
+                    }
+                }
+                .disabled(exporting)
+                if let exportError { Text(exportError).foregroundStyle(Theme.danger) }
+            } footer: {
+                Text("Один текстовый файл со всеми чатами — копия на всякий случай. Расшифровка на этом устройстве; вложения — только названиями.")
+            }
         }
+        .sheet(item: $exported) { ShareSheet(items: [$0.url]) }
         .navigationTitle("Данные и память")
         .navigationBarTitleDisplayMode(.inline)
         .task { cacheBytes = await Self.size(of: AttachmentRepository.tempDir) }
@@ -423,6 +440,19 @@ struct DataSettingsView: View {
             Button("Очистить", role: .destructive) {
                 services.attachments.clear()
                 cacheBytes = 0
+            }
+        }
+    }
+
+    private func exportAll() {
+        exporting = true
+        exportError = nil
+        Task {
+            defer { exporting = false }
+            do {
+                exported = ExportedFile(url: try await ChatExport.exportAll(services: services))
+            } catch {
+                exportError = errorText(error)
             }
         }
     }
