@@ -154,6 +154,13 @@ private struct ChatContent: View {
             ToolbarItem(placement: .principal) { header }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if !model.isGroup && !model.isSaved && !(store.chat(model.chatId)?.isSystem ?? false)
+                        && !(store.chat(model.chatId)?.isDeleted ?? false) {
+                        Button { services.calls.call(model.chatId, video: false) } label: { Label("Позвонить", systemImage: "phone") }
+                            .disabled(services.calls.isBusy)
+                        Button { services.calls.call(model.chatId, video: true) } label: { Label("Видеозвонок", systemImage: "video") }
+                            .disabled(services.calls.isBusy)
+                    }
                     Button { searchQuery = "" } label: { Label("Поиск в переписке", systemImage: "magnifyingglass") }
                     Button { showMedia = true } label: { Label("Вложения", systemImage: "photo.on.rectangle") }
                     Button { showScheduled = true } label: {

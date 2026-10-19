@@ -1417,3 +1417,52 @@ struct StoryLikeRequest: Encodable { let liked: Bool }
 struct StoryHiddenResponse: Decodable { let hidden: [String]? }
 
 struct StoryHiddenRequest: Encodable { let usernames: [String] }
+
+// MARK: - Звонки
+
+/// Сервер ретранслятора: urls — строка или массив.
+struct IceServerDto: Decodable {
+    let urlList: [String]
+    let username: String?
+    let credential: String?
+    enum CodingKeys: String, CodingKey { case urls, username, credential }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let list = try? c.decode([String].self, forKey: .urls) {
+            urlList = list
+        } else {
+            urlList = [try c.decode(String.self, forKey: .urls)]
+        }
+        username = try? c.decodeIfPresent(String.self, forKey: .username)
+        credential = try? c.decodeIfPresent(String.self, forKey: .credential)
+    }
+}
+
+struct TurnCredentialsResponse: Decodable { let iceServers: [IceServerDto]? }
+
+/// answered / missed / declined / busy / failed
+struct CallLogRequest: Encodable {
+    let peer: String
+    let status: String
+    let duration: Int
+    let video: Bool
+}
+
+struct CallHistoryItem: Decodable, Identifiable {
+    let id: Int64
+    let peer: String
+    let peerName: String?
+    let avatarUrl: String?
+    let outgoing: Bool?
+    let status: String?
+    let duration: Int?
+    let video: Bool?
+    let time: String?
+    enum CodingKeys: String, CodingKey {
+        case id, peer, outgoing, status, duration, video, time
+        case peerName = "peer_name"
+        case avatarUrl = "avatar_url"
+    }
+}
+
+struct CallHistoryResponse: Decodable { let calls: [CallHistoryItem]? }

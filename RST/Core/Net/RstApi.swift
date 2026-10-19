@@ -400,6 +400,14 @@ final class RstApi {
 
     func qrDeny(session: String) async throws { try await send("POST", "/api/qr/deny", QrSessionRequest(session: session)) }
 
+    // MARK: - Звонки
+
+    func turnCredentials() async throws -> TurnCredentialsResponse { try await get("/api/turn-credentials") }
+
+    func logCall(_ request: CallLogRequest) async throws { try await send("POST", "/api/calls/log", request) }
+
+    func callHistory() async throws -> CallHistoryResponse { try await get("/api/calls") }
+
     // MARK: - Истории (routers/stories.py)
 
     func stories() async throws -> StoriesResponse { try await get("/api/stories") }

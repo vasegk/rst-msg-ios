@@ -37,6 +37,7 @@ final class Services {
     let chats: ChatListStore
     let stickers: StickerStore
     let stories: StoryStore
+    let calls: CallService
 
     init() {
         let session = SessionStore()
@@ -63,6 +64,7 @@ final class Services {
         let attachments = self.attachments
         self.stories = StoryStore(api: api, userKeys: userKeys, attachments: attachments, socket: socket,
                                   me: { session.username ?? "" })
+        self.calls = CallService(api: api, socket: socket)
     }
 
     var me: String { session.username ?? "" }
@@ -218,6 +220,7 @@ final class AppModel {
 
     /// Всё, что относится к одному аккаунту, кроме самого сеанса.
     private func clearCaches() {
+        services.calls.hangup()
         services.socket.disconnect()
         services.keyCache.clear()
         services.userKeys.clear()

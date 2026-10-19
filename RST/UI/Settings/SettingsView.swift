@@ -40,6 +40,7 @@ struct SettingsView: View {
                 NavigationLink { ChatSettingsView() } label: { Label("Настройки чатов", systemImage: "paintbrush.fill") }
                 NavigationLink { DataSettingsView() } label: { Label("Данные и память", systemImage: "internaldrive.fill") }
                 NavigationLink { FoldersSettingsView() } label: { Label("Папки с чатами", systemImage: "folder.fill") }
+                NavigationLink { CallHistoryView() } label: { Label("Звонки", systemImage: "phone.fill") }
             }
 
             Section {

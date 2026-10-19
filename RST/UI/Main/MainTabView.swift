@@ -13,6 +13,7 @@ struct MainTabView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(ChatListStore.self) private var store
+    @Environment(Services.self) private var services
     @State private var tab: Tab = .chats
     @State private var chatsPath = NavigationPath()
 
@@ -60,6 +61,19 @@ struct MainTabView: View {
         }
         .sheet(item: Binding(get: { app.stickerLink }, set: { app.stickerLink = $0 })) { StickerSetSheet(ref: $0) }
         .sheet(item: Binding(get: { app.qrApproval }, set: { app.qrApproval = $0 })) { QrApproveSheet(link: $0) }
+        // Звонок: окно на весь экран; свёрнутый — плашка сверху
+        .fullScreenCover(isPresented: Binding(
+            get: { services.calls.phase != .idle && !services.calls.minimized },
+            set: { if !$0 && services.calls.phase != .idle { services.calls.minimized = true } })) {
+            CallView()
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if services.calls.phase != .idle && services.calls.minimized { MinimizedCallBar() }
+        }
+        .alert(services.calls.notice ?? "", isPresented: Binding(
+            get: { services.calls.notice != nil }, set: { if !$0 { services.calls.notice = nil } })) {
+            Button("OK", role: .cancel) {}
+        }
     }
 
     @ViewBuilder
