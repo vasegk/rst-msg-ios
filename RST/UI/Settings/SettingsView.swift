@@ -275,6 +275,7 @@ struct PrivacySettingsView: View {
             Section {
                 Toggle("Отчёты о прочтении", isOn: Binding(get: { me?.readReceipts ?? true }, set: { v in update { $0.readReceipts = v } }))
                 Toggle("Комментарии к историям", isOn: Binding(get: { me?.storyComments ?? true }, set: { v in update { $0.storyComments = v } }))
+                NavigationLink { StoryHiddenView() } label: { Text("Скрыть мои истории от") }
             } footer: {
                 Text("Если выключить отчёты о прочтении, вы тоже не увидите их у других.")
             }

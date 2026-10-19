@@ -36,6 +36,7 @@ final class Services {
     let auth: AuthRepository
     let chats: ChatListStore
     let stickers: StickerStore
+    let stories: StoryStore
 
     init() {
         let session = SessionStore()
@@ -59,6 +60,9 @@ final class Services {
         self.auth = AuthRepository(api: api, session: session, userKeys: userKeys)
         self.chats = ChatListStore(api: api, session: session, socket: socket, messages: messages, userKeys: userKeys)
         self.stickers = StickerStore(api: api)
+        let attachments = self.attachments
+        self.stories = StoryStore(api: api, userKeys: userKeys, attachments: attachments, socket: socket,
+                                  me: { session.username ?? "" })
     }
 
     var me: String { session.username ?? "" }
@@ -221,6 +225,7 @@ final class AppModel {
         services.messages.clearOutbox()
         services.chats.clear()
         services.stickers.clear()
+        services.stories.clear()
     }
 
     private func endSession(_ reason: SessionEnd) {

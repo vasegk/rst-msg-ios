@@ -1314,3 +1314,106 @@ struct QrApproveRequest: Encodable {
 }
 
 struct QrSessionRequest: Encodable { let session: String }
+
+// MARK: - Истории (routers/stories.py)
+
+struct StoryDto: Decodable, Identifiable, Equatable {
+    let id: Int64
+    /// Конверт {f, m, c}, зашифрованный ключом истории.
+    let content: String
+    let fileUrl: String
+    /// Ключ истории, упакованный для меня: {"v":1,"by","iv","ciphertext"}.
+    let key: String
+    let createdAt: String?
+    let expiresAt: String?
+    var viewed: Bool?
+    var liked: Bool?
+    var comments: Int?
+    var views: Int?
+    var likes: Int?
+    enum CodingKeys: String, CodingKey {
+        case id, content, key, viewed, liked, comments, views, likes
+        case fileUrl = "file_url"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct StoryAuthorDto: Decodable, Identifiable, Equatable {
+    let author: String
+    let displayName: String?
+    let avatarUrl: String?
+    let commentsEnabled: Bool?
+    var stories: [StoryDto]
+    var id: String { author }
+    var hasUnseen: Bool { stories.contains { $0.viewed != true } }
+    enum CodingKeys: String, CodingKey {
+        case author, stories
+        case displayName = "display_name"
+        case avatarUrl = "avatar_url"
+        case commentsEnabled = "comments_enabled"
+    }
+}
+
+struct StoriesResponse: Decodable { let authors: [StoryAuthorDto]? }
+
+struct StoryAudienceResponse: Decodable { let viewers: [String]? }
+
+struct StoryCreateRequest: Encodable {
+    let content: String
+    let fileUrl: String
+    let keys: [String: String]
+    enum CodingKeys: String, CodingKey {
+        case content, keys
+        case fileUrl = "file_url"
+    }
+}
+
+struct StoryCreateResponse: Decodable { let id: Int64 }
+
+struct StoryViewerDto: Decodable, Identifiable {
+    let username: String
+    let displayName: String?
+    let avatarUrl: String?
+    let viewedAt: String?
+    let liked: Bool?
+    var id: String { username }
+    enum CodingKeys: String, CodingKey {
+        case username, liked
+        case displayName = "display_name"
+        case avatarUrl = "avatar_url"
+        case viewedAt = "viewed_at"
+    }
+}
+
+struct StoryViewersResponse: Decodable {
+    let audience: Int?
+    let viewers: [StoryViewerDto]?
+}
+
+struct StoryCommentDto: Decodable, Identifiable {
+    let id: Int64
+    let author: String
+    let displayName: String?
+    let avatarUrl: String?
+    let content: String
+    let createdAt: String?
+    let canDelete: Bool?
+    enum CodingKeys: String, CodingKey {
+        case id, author, content
+        case displayName = "display_name"
+        case avatarUrl = "avatar_url"
+        case createdAt = "created_at"
+        case canDelete = "can_delete"
+    }
+}
+
+struct StoryCommentsResponse: Decodable { let comments: [StoryCommentDto]? }
+
+struct StoryCommentRequest: Encodable { let content: String }
+
+struct StoryLikeRequest: Encodable { let liked: Bool }
+
+struct StoryHiddenResponse: Decodable { let hidden: [String]? }
+
+struct StoryHiddenRequest: Encodable { let usernames: [String] }

@@ -52,6 +52,15 @@ extension MessageRepository {
         }
     }
 
+    /// Ответ на историю — в личку автору, с полем s (автор, номер, миниатюра).
+    func sendStoryReply(to author: String, text: String, ref: StoryRef) async throws {
+        let keys = try await sendKeys(for: author)
+        var envelope = Envelope(text: text)
+        envelope.story = ref
+        let content = try MessageCrypto.encryptEnvelope(keys, envelope)
+        guard socket.sendMessage(receiver: author, content: content) else { throw NotConnectedError() }
+    }
+
     /// Поделиться контактом: текст для старых клиентов, карточка — полем c.
     func shareContact(_ chatId: String, contact: ContactRef) async throws {
         let keys = try await sendKeys(for: chatId)

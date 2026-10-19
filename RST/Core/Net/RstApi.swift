@@ -400,6 +400,37 @@ final class RstApi {
 
     func qrDeny(session: String) async throws { try await send("POST", "/api/qr/deny", QrSessionRequest(session: session)) }
 
+    // MARK: - Истории (routers/stories.py)
+
+    func stories() async throws -> StoriesResponse { try await get("/api/stories") }
+
+    /// Кому видны мои истории — им упаковывается ключ.
+    func storyAudience() async throws -> StoryAudienceResponse { try await get("/api/stories/audience") }
+
+    func createStory(_ request: StoryCreateRequest) async throws -> StoryCreateResponse { try await post("/api/stories", request) }
+
+    func viewStory(_ id: Int64) async throws { try await send("POST", "/api/stories/\(id)/view", EmptyBody()) }
+
+    func storyViewers(_ id: Int64) async throws -> StoryViewersResponse { try await get("/api/stories/\(id)/viewers") }
+
+    func likeStory(_ id: Int64, liked: Bool) async throws { try await send("POST", "/api/stories/\(id)/like", StoryLikeRequest(liked: liked)) }
+
+    func storyComments(_ id: Int64) async throws -> StoryCommentsResponse { try await get("/api/stories/\(id)/comments") }
+
+    func addStoryComment(_ id: Int64, content: String) async throws {
+        try await send("POST", "/api/stories/\(id)/comments", StoryCommentRequest(content: content))
+    }
+
+    func deleteStoryComment(story: Int64, comment: Int64) async throws {
+        try await send("DELETE", "/api/stories/\(story)/comments/\(comment)", Optional<EmptyBody>.none)
+    }
+
+    func deleteStory(_ id: Int64) async throws { try await send("DELETE", "/api/stories/\(id)", Optional<EmptyBody>.none) }
+
+    func storyHidden() async throws -> StoryHiddenResponse { try await get("/api/stories/hidden") }
+
+    func setStoryHidden(_ usernames: [String]) async throws { try await send("PUT", "/api/stories/hidden", StoryHiddenRequest(usernames: usernames)) }
+
     // MARK: - Стикеры (routers/stickers.py)
 
     /// Добавленные себе наборы (свои — тоже).

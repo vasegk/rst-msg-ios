@@ -33,6 +33,12 @@ struct ChatListView: View {
 
     var body: some View {
         List {
+            if !archived && query.isEmpty && folderId == nil {
+                StoriesBar()
+                    .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             if !archived && query.isEmpty && !store.folders.isEmpty {
                 folderChips
                     .listRowInsets(EdgeInsets())
