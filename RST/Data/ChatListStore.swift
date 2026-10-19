@@ -18,6 +18,12 @@ final class ChatListStore {
     private(set) var loadError: String?
     /// Аккаунт заблокирован модератором до этого времени.
     var blockedUntil: String?
+    /// Ограничение модератора ещё действует («навсегда» — без даты).
+    var isBlockedNow: Bool {
+        guard let blockedUntil else { return false }
+        guard let date = ServerTime.parse(blockedUntil) else { return true }
+        return date > Date()
+    }
     var lastServerError: String?
     /// Открытый на экране чат: ему не прибавляем непрочитанное.
     var activeChatId: String?

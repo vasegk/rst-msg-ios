@@ -73,6 +73,7 @@ private struct ChatContent: View {
     @State private var viewOnceImage: UIImage?
     @State private var viewOnceVideo: URL?
     @Environment(AppModel.self) private var app
+    @State private var confetti = false
     /// Идёт запись или трансляция экрана — защищённый чат прячется.
     @State private var screenCaptured = UIScreen.main.isCaptured
 
@@ -171,6 +172,10 @@ private struct ChatContent: View {
             }
         }
         .toolbarBackground(.visible, for: .navigationBar)
+        .overlay {
+            if confetti { ConfettiView().ignoresSafeArea().allowsHitTesting(false) }
+        }
+        .onAppear(perform: birthdayConfetti)
         .task { await model.loadIfNeeded() }
         .onDisappear { model.dispose() }
         .sheet(item: $forwarding) { message in
@@ -236,6 +241,16 @@ private struct ChatContent: View {
                     }
                 }
         }
+    }
+
+    /// День рождения собеседника — залп конфетти, раз в день на чат.
+    private func birthdayConfetti() {
+        guard !model.isGroup, !model.isSaved, ConfettiView.isToday(store.users[model.chatId]?.birthday) else { return }
+        let key = "rst.confetti.\(model.chatId).\(Calendar.current.component(.year, from: Date()))-\(Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0)"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        confetti = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7) { confetti = false }
     }
 
     private func handle(_ action: MessageAction) {

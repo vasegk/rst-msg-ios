@@ -18,6 +18,7 @@ struct UserProfileView: View {
     @State private var showReport = false
     @State private var reportReason = ""
     @State private var confirmClear = false
+    @State private var showAvatars = false
     @State private var info: String?
 
     private var summary: ChatSummary? { store.chat(username) }
@@ -29,6 +30,7 @@ struct UserProfileView: View {
                 VStack(spacing: 8) {
                     AvatarView(name: name, url: user?.avatarUrl ?? summary?.avatarUrl, size: 110,
                                online: summary?.online ?? (user?.online ?? false))
+                        .onTapGesture { showAvatars = true }
                     HStack(spacing: 6) {
                         Text(name).font(.system(size: 24, weight: .bold))
                         if (user?.verified ?? summary?.verified) == true { VerifiedBadge(size: 18) }
@@ -50,7 +52,12 @@ struct UserProfileView: View {
                 if let birthday = user?.birthday, !birthday.isEmpty {
                     row("День рождения", birthday + (isBirthdayToday(birthday) ? " 🎉" : ""))
                 }
-                if let title = user?.musicTitle, !title.isEmpty { row("Трек в профиле", title) }
+            }
+
+            if let music = user?.musicUrl, !music.isEmpty {
+                Section("Музыка") {
+                    ProfileMusicPlayer(url: music, title: user?.musicTitle ?? "")
+                }
             }
 
             if !shared.isEmpty {
@@ -102,6 +109,9 @@ struct UserProfileView: View {
         .navigationTitle("Профиль")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .fullScreenCover(isPresented: $showAvatars) {
+            AvatarHistoryViewer(username: username, name: name, currentUrl: user?.avatarUrl ?? summary?.avatarUrl)
+        }
         .alert("Имя контакта", isPresented: $showRename) {
             TextField("Имя", text: $renameText)
             Button("Сохранить") { rename() }

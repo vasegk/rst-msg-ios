@@ -21,6 +21,7 @@ struct GroupInfoView: View {
     /// Чью подпись правим (окно с полем).
     @State private var titleFor: GroupMemberDto?
     @State private var titleText = ""
+    @State private var cropItem: CropItem?
 
     private var me: String { store.me }
     private var myRole: String { info?.members?.first { $0.username == me }?.role ?? store.chat(chatId)?.myRole ?? "member" }
@@ -140,7 +141,14 @@ struct GroupInfoView: View {
         .onChange(of: avatarItem) { _, item in
             guard let item else { return }
             avatarItem = nil
-            Task { await uploadAvatar(item) }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    cropItem = CropItem(image: image)
+                }
+            }
+        }
+        .sheet(item: $cropItem) { item in
+            AvatarCropSheet(image: item.image) { cropped in Task { await uploadAvatar(cropped) } }
         }
         .confirmationDialog("Покинуть?", isPresented: $confirmLeave, titleVisibility: .visible) {
             Button("Покинуть", role: .destructive) { leave() }
@@ -374,9 +382,8 @@ struct GroupInfoView: View {
         }
     }
 
-    private func uploadAvatar(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let jpeg = AttachmentRepository.compressImage(data, maxSide: 640, quality: 0.85) else { return }
+    private func uploadAvatar(_ image: UIImage) async {
+        guard let jpeg = image.jpegData(compressionQuality: 0.85) else { return }
         do {
             let url = try await services.attachments.uploadPlain(jpeg, fileName: "avatar.jpg", mimeType: "image/jpeg")
             var request = GroupUpdateRequest(groupId: chatId)

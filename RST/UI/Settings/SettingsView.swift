@@ -25,6 +25,13 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                NavigationLink { EmojiStatusView() } label: {
+                    HStack {
+                        Label("Эмодзи-статус", systemImage: "face.smiling")
+                        Spacer()
+                        Text(store.emojiStatus(of: services.me) ?? "не задан").foregroundStyle(Theme.muted)
+                    }
+                }
             }
 
             Section {
@@ -84,6 +91,8 @@ struct MyProfileView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var loaded = false
+    @State private var cropItem: CropItem?
+    @State private var showAvatars = false
 
     var body: some View {
         Form {
@@ -104,6 +113,11 @@ struct MyProfileView: View {
                     Spacer()
                 }
                 .listRowBackground(Color.clear)
+                if let url = store.myProfile?.avatarUrl, !url.isEmpty {
+                    Button("Все фото профиля") { showAvatars = true }
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                }
             }
             Section("Профиль") {
                 TextField("Имя", text: $displayName)
@@ -119,6 +133,7 @@ struct MyProfileView: View {
                 TextField("Почта", text: $email).keyboardType(.emailAddress).textInputAutocapitalization(.never)
                 TextField("День рождения (ГГГГ-ММ-ДД)", text: $birthday).keyboardType(.numbersAndPunctuation)
             }
+            ProfileMusicSection()
             Section {
                 ShareLink(item: "\(services.api.baseURL.absoluteString)/@\(services.me)") {
                     Label("Ссылка на профиль", systemImage: "link")
@@ -139,7 +154,23 @@ struct MyProfileView: View {
         .onChange(of: avatarItem) { _, item in
             guard let item else { return }
             avatarItem = nil
-            Task { await uploadAvatar(item) }
+            Task {
+                // Сначала обрезка — как в вебе
+                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    cropItem = CropItem(image: image)
+                } else {
+                    message = "Не удалось прочитать фото"
+                }
+            }
+        }
+        .sheet(item: $cropItem) { item in
+            AvatarCropSheet(image: item.image) { cropped in
+                Task { await uploadAvatar(cropped) }
+            }
+        }
+        .fullScreenCover(isPresented: $showAvatars) {
+            AvatarHistoryViewer(username: services.me, name: store.myProfile?.displayName ?? services.me,
+                                currentUrl: store.myProfile?.avatarUrl)
         }
     }
 
@@ -175,9 +206,8 @@ struct MyProfileView: View {
         }
     }
 
-    private func uploadAvatar(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let jpeg = AttachmentRepository.compressImage(data, maxSide: 640, quality: 0.85) else {
+    private func uploadAvatar(_ image: UIImage) async {
+        guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
             message = "Не удалось прочитать фото"
             return
         }

@@ -39,13 +39,8 @@ struct ChatListView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
-            if let until = store.blockedUntil, !archived {
-                Text("Аккаунт ограничен модератором до \(until). Отправка сообщений недоступна.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.onSurface)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.danger.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+            if let until = store.blockedUntil, store.isBlockedNow, !archived {
+                ModerationBanner(until: until)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }

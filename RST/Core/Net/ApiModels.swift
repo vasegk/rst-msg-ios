@@ -199,6 +199,9 @@ struct ProfileUpdateRequest: Encodable {
     var notifyGroups: Bool?
     var autoreplyOn: Bool?
     var autoreplyText: String?
+    /// Музыка в профиле: /uploads/<32 hex>.<mp3|m4a|aac|ogg|wav|webm>; "" — убрать.
+    var musicUrl: String?
+    var musicTitle: String?
 
     init(username: String) { self.username = username }
 
@@ -206,6 +209,8 @@ struct ProfileUpdateRequest: Encodable {
         case username, bio, status, birthday, email, phone
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
+        case musicUrl = "music_url"
+        case musicTitle = "music_title"
         case birthdayPrivacy = "birthday_privacy"
         case phonePrivacy = "phone_privacy"
         case emailPrivacy = "email_privacy"
@@ -1238,3 +1243,17 @@ struct TopicUpdateRequest: Encodable {
     var icon: String?
     var closed: Bool?
 }
+
+// MARK: - История аватаров (routers/avatars.py)
+
+struct AvatarHistoryItem: Decodable, Hashable {
+    let url: String
+    /// Когда поставлен; nil — поставлен до истории.
+    let setAt: String?
+    enum CodingKeys: String, CodingKey {
+        case url
+        case setAt = "set_at"
+    }
+}
+
+struct AvatarsResponse: Decodable { let avatars: [AvatarHistoryItem]? }

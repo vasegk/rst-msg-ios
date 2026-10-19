@@ -304,6 +304,14 @@ final class RstApi {
         try await send("PUT", "/api/emoji_status", EmojiStatusRequest(emoji: emoji, until: until.map { ServerTime.iso($0) }))
     }
 
+    /// Все аватары человека, сверху нынешний.
+    func avatars(_ username: String) async throws -> AvatarsResponse { try await get("/api/users/\(path(username))/avatars") }
+
+    /// Убрать своё фото из истории; убрали нынешний — сервер ставит следующий.
+    func deleteMyAvatar(url: String) async throws {
+        try await send("DELETE", "/api/users/me/avatars?url=\(queryEncoded(url))", Optional<EmptyBody>.none)
+    }
+
     func updateGroup(_ request: GroupUpdateRequest) async throws { try await send("POST", "/api/groups/update", request) }
 
     func groupSettings(_ request: GroupSettingsRequest) async throws { try await send("POST", "/api/groups/settings", request) }

@@ -81,7 +81,7 @@ final class ChatViewModel {
     var isChannel: Bool { summary?.isChannel ?? groupInfo?.isChannel ?? false }
 
     var canWrite: Bool {
-        if services.chats.blockedUntil != nil { return false }
+        if services.chats.isBlockedNow { return false }
         // В закрытую тему пишут только владелец и админы
         if topic?.closed == true && !["owner", "admin"].contains(myRole) { return false }
         if let summary { return summary.canWrite }

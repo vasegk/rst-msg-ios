@@ -176,7 +176,7 @@ struct ComposerView: View {
     }
 
     private var blockedText: String {
-        if store.blockedUntil != nil { return "Отправка ограничена модератором" }
+        if store.isBlockedNow { return "Отправка ограничена модератором" }
         if model.topic?.closed == true { return "Тема закрыта: писать могут только администраторы" }
         if let s = store.chat(model.chatId) {
             if s.isSystem { return "Писать в этот чат нельзя" }

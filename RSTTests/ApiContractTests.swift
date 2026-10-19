@@ -163,4 +163,31 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual(CommentsSheet.countText(21), "21 комментарий")
         XCTAssertEqual(CommentsSheet.countText(5), "5 комментариев")
     }
+
+    /// Этап D: отсчёт блокировки, день рождения, подпись истории аватаров, музыка в профиле.
+    func testProfileExtras() throws {
+        XCTAssertEqual(ModerationText.remaining(2 * 86400 + 3 * 3600 + 5), "2 дня 3 часа")
+        XCTAssertEqual(ModerationText.remaining(14 * 60 + 5), "14 минут 5 секунд")
+        XCTAssertEqual(ModerationText.remaining(21), "21 секунда")
+        XCTAssertEqual(ModerationText.remaining(3600 + 60), "1 час 1 минута")
+
+        let now = try XCTUnwrap(ServerTime.parse("2026-10-19T12:00:00"))
+        let today = Calendar.current.dateComponents([.month, .day], from: now)
+        XCTAssertTrue(ConfettiView.isToday(String(format: "1990-%02d-%02d", today.month!, today.day!), now: now))
+        XCTAssertFalse(ConfettiView.isToday("1990-01-01", now: now))
+        XCTAssertFalse(ConfettiView.isToday(nil, now: now))
+
+        XCTAssertEqual(AvatarHistoryViewer.dateLabel(nil), "")
+        XCTAssertTrue(AvatarHistoryViewer.dateLabel("2020-03-05T10:00:00", now: now).hasSuffix("2020"))
+
+        var request = ProfileUpdateRequest(username: "ivan")
+        request.musicUrl = ""
+        request.musicTitle = ""
+        let body = String(decoding: try JSONCoding.encodeData(request), as: UTF8.self)
+        XCTAssertTrue(body.contains("\"music_url\":\"\""))
+        let avatars = #"{"avatars":[{"url":"/uploads/a.jpg","set_at":null},{"url":"/uploads/b.jpg","set_at":"2026-01-02T03:04:05"}]}"#
+        let list = try JSONDecoder().decode(AvatarsResponse.self, from: Data(avatars.utf8)).avatars ?? []
+        XCTAssertEqual(list.count, 2)
+        XCTAssertNil(list[0].setAt)
+    }
 }
