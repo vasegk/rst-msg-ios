@@ -26,6 +26,12 @@ final class ChatViewModel {
     /// Режим выделения: выбранные сообщения.
     var selected: Set<Int64> = []
     var selecting = false
+    /// Упоминания меня, ещё не попавшиеся на глаза (кнопка «@»), по возрастанию.
+    var mentionQueue: [Int64] = []
+    /// Мои сообщения с новыми реакциями (кнопка «❤»), по порядку.
+    var reactionQueue: [Int64] = []
+    /// Сколько было непрочитанных при открытии — среди них ищем упоминания.
+    @ObservationIgnored var unreadAtOpen = 0
     /// Прокрутить к сообщению (ответ, закреп).
     var scrollTarget: Int64?
     var highlighted: Int64?
@@ -45,6 +51,7 @@ final class ChatViewModel {
         self.isGroup = MessageRepository.isGroup(chatId)
         self.services = services
         subscription = services.socket.subscribe(owner: self) { [weak self] event in self?.handle(event) }
+        unreadAtOpen = services.chats.chat(chatId)?.unread ?? 0
         text = UserDefaults.standard.string(forKey: draftKey) ?? ""
     }
 
@@ -128,6 +135,10 @@ final class ChatViewModel {
             loadError = nil
             if let keys = services.keyCache.get(chatId) { keyState = keys.groupState }
             keyChanged = !isGroup && services.userKeys.keyChanged.contains(chatId)
+            // Упоминания среди непрочитанных на момент открытия
+            let incoming = messages.filter { !$0.isMine && !$0.isSystem }.suffix(unreadAtOpen)
+            mentionQueue = incoming.filter(\.mentionsMe).map(\.id)
+            Task { await loadReactionQueue() }
             markVisibleRead()
         } catch {
             if messages.isEmpty { loadError = errorText(error) }
@@ -224,6 +235,7 @@ final class ChatViewModel {
             Task {
                 let message = await services.messages.decryptSingle(dto, chatId: chatId)
                 merge([message])
+                if message.mentionsMe && !mentionQueue.contains(message.id) { mentionQueue.append(message.id) }
                 scrollTarget = message.id
                 if !message.isMine { markVisibleRead() }
             }
@@ -253,6 +265,12 @@ final class ChatViewModel {
         case .messageDeleted(let id, _):
             messages.removeAll { $0.id == id }
             pinned.removeAll { $0.id == id }
+        case .reactionUpdate(let id, let reactions, _) where messages.first(where: { $0.id == id })?.isMine == true:
+            // Реакция на моё — список «❤» перечитать
+            if let i = messages.firstIndex(where: { $0.id == id }) {
+                messages[i].reactions = MessageRepository.parseReactions(reactions)
+            }
+            Task { await loadReactionQueue() }
         case .reactionUpdate(let id, let reactions, _):
             if let i = messages.firstIndex(where: { $0.id == id }) {
                 messages[i].reactions = MessageRepository.parseReactions(reactions)

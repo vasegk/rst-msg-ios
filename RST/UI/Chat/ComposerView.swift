@@ -42,6 +42,33 @@ struct ComposerView: View {
                 .background(Theme.surface.opacity(0.95))
             }
 
+            if let token = mentionToken {
+                let suggestions = model.mentionSuggestions(for: token)
+                if !suggestions.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(suggestions) { s in
+                                Button { insertMention(s.username) } label: {
+                                    HStack(spacing: 10) {
+                                        AvatarView(name: s.title, url: store.users[s.username]?.avatarUrl, size: 30)
+                                        Text(s.title).foregroundStyle(Theme.onSurface)
+                                        if !Mentions.special.contains(s.username) {
+                                            Text("@" + s.username).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 180)
+                    .background(Theme.surface.opacity(0.97))
+                }
+            }
+
             if !model.canWrite {
                 Text(blockedText)
                     .font(.system(size: 14))
@@ -92,6 +119,20 @@ struct ComposerView: View {
             }
             Button("Отмена", role: .cancel) { singleVisual = nil }
         }
+    }
+
+    /// Последнее слово в поле, если это начатое «@…» (в группе).
+    private var mentionToken: String? {
+        guard model.isGroup, let last = model.text.split(separator: " ", omittingEmptySubsequences: false).last,
+              last.hasPrefix("@"), !last.contains("\n") else { return nil }
+        return String(last.dropFirst())
+    }
+
+    private func insertMention(_ username: String) {
+        var parts = model.text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard !parts.isEmpty else { return }
+        parts[parts.count - 1] = "@" + username
+        model.updateText(parts.joined(separator: " ") + " ")
     }
 
     /// 0 — одна точка; иначе трансляция на столько секунд.

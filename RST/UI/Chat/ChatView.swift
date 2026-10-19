@@ -59,6 +59,8 @@ private struct ChatContent: View {
     @State private var showScheduled = false
     @State private var showTimer = false
     @State private var forwardingSelection = false
+    @State private var anyReactionOf: ChatMessage?
+    @State private var showMedia = false
     @State private var viewOnceImage: UIImage?
     @State private var viewOnceVideo: URL?
     @Environment(AppModel.self) private var app
@@ -105,6 +107,12 @@ private struct ChatContent: View {
             ChatSearchSheet(model: model, query: searchQuery ?? "") { id in model.jump(to: id) }
         }
         .sheet(isPresented: $showScheduled) { ScheduledListSheet(model: model) }
+        .sheet(item: $anyReactionOf) { message in
+            EmojiPickerSheet { emoji in model.react(message, emoji) }
+        }
+        .sheet(isPresented: $showMedia) {
+            MediaGallerySheet(model: model) { id in model.jump(to: id) }
+        }
         .sheet(isPresented: $showTimer) { ChatTimerSheet(model: model) }
         .sheet(isPresented: $forwardingSelection) {
             ChatPickerSheet(title: "Переслать \(model.selected.count)") { chat in
@@ -130,6 +138,7 @@ private struct ChatContent: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { searchQuery = "" } label: { Label("Поиск в переписке", systemImage: "magnifyingglass") }
+                    Button { showMedia = true } label: { Label("Вложения", systemImage: "photo.on.rectangle") }
                     Button { showScheduled = true } label: {
                         Label(model.isSaved ? "Напоминания" : "Отложенные", systemImage: "clock")
                     }
@@ -194,6 +203,28 @@ private struct ChatContent: View {
         .buttonStyle(.plain)
     }
 
+    private func jumpButton(_ icon: String, count: Int, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(Theme.card))
+                .overlay(Circle().stroke(Theme.outline))
+                .overlay(alignment: .topTrailing) {
+                    if count > 1 {
+                        Text("\(count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(tint))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+        }
+    }
+
     private func handle(_ action: MessageAction) {
         switch action {
         case .select(let m): model.startSelection(m)
@@ -205,6 +236,7 @@ private struct ChatContent: View {
             app.pendingChat = m.sender
         case .readers(let m): readersOf = m
         case .hashtag(let tag): searchQuery = "#" + tag
+        case .anyReaction(let m): anyReactionOf = m
         }
     }
 
@@ -450,6 +482,7 @@ private struct ChatContent: View {
                                        onOpenViewOnce: { openViewOnce($0) },
                                        onAction: { handle($0) })
                                 .id(item.id)
+                                .onAppear { model.markSeen(m.id) }
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                         case .album(let list, let showSender, let showAvatar):
                             AlbumRow(messages: list, isGroup: model.isGroup, isChannel: model.isChannel,
@@ -466,6 +499,23 @@ private struct ChatContent: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .bottomTrailing) {
+                // «❤» — новые реакции на мои, «@» — непросмотренные упоминания
+                VStack(spacing: 10) {
+                    if !model.reactionQueue.isEmpty {
+                        jumpButton("heart.fill", count: model.reactionQueue.count, tint: Theme.danger) {
+                            Task { await model.jumpToNextReaction() }
+                        }
+                    }
+                    if !model.mentionQueue.isEmpty {
+                        jumpButton("at", count: model.mentionQueue.count, tint: Theme.accent) {
+                            Task { await model.jumpToNextMention() }
+                        }
+                    }
+                }
+                .padding(.trailing, 14)
+                .padding(.bottom, nearBottom ? 14 : 64)
+            }
             .overlay {
                 if model.loading && model.messages.isEmpty {
                     ProgressView().tint(Theme.accent)

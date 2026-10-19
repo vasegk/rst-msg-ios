@@ -8,6 +8,152 @@ enum MessageAction {
     case replyPrivately(ChatMessage)
     case readers(ChatMessage)
     case hashtag(String)
+    case anyReaction(ChatMessage)
+}
+
+// MARK: - Любая реакция
+
+/// Любой эмодзи реакцией (сервер принимает один значок, в т. ч. составной).
+struct EmojiPickerSheet: View {
+    var onPick: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var custom = ""
+
+    private struct EmojiGroup: Identifiable {
+        let title: String
+        let emojis: [String]
+        var id: String { title }
+    }
+
+    private static let groups: [EmojiGroup] = [
+        EmojiGroup(title: "Смайлы", emojis: Array("😀😃😄😁😆😅😂🤣🥲☺️😊😇🙂🙃😉😌😍🥰😘😋😛😝😜🤪🤨🧐🤓😎🥳😏😒😞😔😟😕🙁☹️😣😖😫😩🥺😢😭😤😠😡🤬🤯😳🥵🥶😱😨😰😥😓🤗🤔🫡🤭🤫😶😐😑😬🙄😯😮😲🥱😴🤤😵🤐🥴🤢🤮🤧😷🤒🤑🤠😈👻💀👽🤖🎃😺😹😻").map(String.init)),
+        EmojiGroup(title: "Жесты", emojis: Array("👋🤚✋🖖👌🤌🤏✌️🤞🫰🤟🤘🤙👈👉👆👇☝️👍👎✊👊👏🙌🫶👐🤲🤝🙏✍️💪👀👅👄").map(String.init)),
+        EmojiGroup(title: "Сердца", emojis: Array("❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝").map(String.init)),
+        EmojiGroup(title: "Разное", emojis: Array("🔥✨⭐🌟💫💥💯✅❌❓❗⚡🎉🎊🎁🏆🥇🎯🚀💡📌🔑💰🍕🍔🍿🍰🎂☕🍺🍷🥂⚽🎮🎧🎵📷🌈☀️🌙🌸🌹🍀🐶🐱🦊🐻🐼🐯🦁🐸🐵🙈🙉🙊🦄🐝🦋🐢🐳").map(String.init)),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        TextField("Любой эмодзи", text: $custom)
+                            .textFieldStyle(.roundedBorder)
+                        Button("OK") { pick(custom) }
+                            .disabled(!Self.isSingleEmoji(custom))
+                    }
+                    ForEach(Self.groups) { group in
+                        Text(group.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 8) {
+                            ForEach(Array(group.emojis.enumerated()), id: \.offset) { _, emoji in
+                                Button { pick(emoji) } label: { Text(emoji).font(.system(size: 28)) }
+                                    .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Реакция")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } } }
+        }
+    }
+
+    /// Один значок (в т. ч. составной): без ASCII и пробелов, до 16 знаков.
+    static func isSingleEmoji(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard t.count == 1, t.utf16.count <= 16, !t.contains(where: { $0.isASCII }) else { return false }
+        return t.unicodeScalars.contains { $0.properties.isEmoji }
+    }
+
+    private func pick(_ emoji: String) {
+        let e = emoji.trimmingCharacters(in: .whitespaces)
+        guard Self.isSingleEmoji(e) else { return }
+        dismiss()
+        onPick(e)
+    }
+}
+
+// MARK: - Вложения чата
+
+/// «Вложения» чата: фото и видео сеткой, файлы и голосовые списком;
+/// нажатие — к сообщению.
+struct MediaGallerySheet: View {
+    let model: ChatViewModel
+    var onJump: (Int64) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [ChatMessage] = []
+    @State private var loading = true
+    @State private var tab = 0
+
+    private func isVisual(_ m: ChatMessage) -> Bool {
+        (m.attachment?.isImage ?? false) || (m.attachment?.isVideo ?? false)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("", selection: $tab) {
+                    Text("Фото и видео").tag(0)
+                    Text("Файлы").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                if tab == 0 {
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3), spacing: 2) {
+                            ForEach(items.filter { isVisual($0) }) { m in
+                                cell(m)
+                            }
+                        }
+                    }
+                } else {
+                    List(items.filter { !isVisual($0) }) { m in
+                        Button { dismiss(); onJump(m.id) } label: {
+                            HStack {
+                                Image(systemName: (m.attachment?.isAudio ?? false) ? "waveform" : "doc")
+                                VStack(alignment: .leading) {
+                                    Text((m.attachment?.isAudio ?? false) ? "Голосовое сообщение" : (m.attachment?.fileName ?? "Файл"))
+                                        .lineLimit(1)
+                                    Text(TimeFormat.listTime(m.createdAt)).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if loading { ProgressView() }
+                if !loading && items.isEmpty { Text("Вложений пока нет").foregroundStyle(Theme.muted) }
+            }
+            .navigationTitle("Вложения")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Закрыть") { dismiss() } } }
+            .task {
+                items = await model.loadMedia()
+                loading = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cell(_ m: ChatMessage) -> some View {
+        if let a = m.attachment {
+            Group {
+                if a.isImage {
+                    EncryptedImageView(attachment: a, maxWidth: 130, maxHeight: 130)
+                } else {
+                    VideoAttachmentView(attachment: a)
+                }
+            }
+            .frame(width: 124, height: 124)
+            .clipped()
+            .contextMenu {
+                Button { dismiss(); onJump(m.id) } label: { Label("К сообщению", systemImage: "arrow.right.circle") }
+            }
+        }
+    }
 }
 
 // MARK: - Выбор времени (отложенное, напоминание)

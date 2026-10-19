@@ -163,6 +163,90 @@ extension ChatViewModel {
         }
     }
 
+    // MARK: - Кнопки «@» и «❤»
+
+    func loadReactionQueue() async {
+        guard let items = try? await services.api.reactionsUnread(chat: chatId).items else { return }
+        var ids: [Int64] = []
+        for item in items where !ids.contains(item.messageId) { ids.append(item.messageId) }
+        reactionQueue = ids
+    }
+
+    /// Сообщение побывало на экране — упоминание и новая реакция увидены.
+    func markSeen(_ id: Int64) {
+        guard visible else { return }
+        mentionQueue.removeAll { $0 == id }
+        if reactionQueue.contains(id) {
+            reactionQueue.removeAll { $0 == id }
+            let chat = chatId
+            Task { try? await services.api.reactionsSeen(chat: chat, ids: [id]) }
+        }
+    }
+
+    /// К самому раннему непросмотренному; давнее — догрузить.
+    func jumpToNextMention() async {
+        guard let id = mentionQueue.first else { return }
+        await jumpLoading(id)
+        mentionQueue.removeAll { $0 == id }
+    }
+
+    func jumpToNextReaction() async {
+        guard let id = reactionQueue.first else { return }
+        await jumpLoading(id)
+        markSeen(id)
+        reactionQueue.removeAll { $0 == id }
+    }
+
+    private func jumpLoading(_ id: Int64) async {
+        var pages = 0
+        while !messages.contains(where: { $0.id == id }) && hasMore && pages < 10 {
+            await loadOlder()
+            pages += 1
+        }
+        jump(to: id)
+    }
+
+    // MARK: - Подсказка «@»
+
+    struct MentionSuggestion: Identifiable, Equatable {
+        let username: String
+        let title: String
+        var id: String { username }
+    }
+
+    /// Участники группы по нику, имени профиля и имени в чате; «все» — админам.
+    func mentionSuggestions(for token: String) -> [MentionSuggestion] {
+        guard isGroup else { return [] }
+        let q = token.lowercased()
+        var list: [MentionSuggestion] = []
+        if ["owner", "admin"].contains(myRole) && ("все".hasPrefix(q) || "all".hasPrefix(q)) {
+            list.append(MentionSuggestion(username: "все", title: "Все участники"))
+        }
+        if "онлайн".hasPrefix(q) || "online".hasPrefix(q) {
+            list.append(MentionSuggestion(username: "онлайн", title: "Все, кто в сети"))
+        }
+        for m in groupInfo?.members ?? [] where m.username != me {
+            let name = services.chats.displayName(m.username)
+            if q.isEmpty || m.username.lowercased().hasPrefix(q) || name.lowercased().contains(q)
+                || m.shownName.lowercased().contains(q) {
+                list.append(MentionSuggestion(username: m.username, title: name))
+            }
+            if list.count >= 8 { break }
+        }
+        return list
+    }
+
+    // MARK: - Галерея вложений
+
+    func loadMedia() async -> [ChatMessage] {
+        do {
+            return try await services.messages.media(chatId)
+        } catch {
+            toast = errorText(error)
+            return []
+        }
+    }
+
     // MARK: - Поиск по загруженной переписке
 
     /// Поиск по расшифрованному на устройстве (сервер хранит только шифр).

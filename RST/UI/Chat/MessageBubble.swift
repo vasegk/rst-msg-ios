@@ -269,6 +269,7 @@ struct MessageRow: View {
                 ForEach(["👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "🎉", "🤔", "👎"], id: \.self) { emoji in
                     Button(emoji) { model.react(message, emoji) }
                 }
+                Button("Любая…") { onAction(.anyReaction(message)) }
             } label: { Label("Реакция", systemImage: "face.smiling") }
             if model.canWrite {
                 Button { model.startReply(message) } label: { Label("Ответить", systemImage: "arrowshape.turn.up.left") }
