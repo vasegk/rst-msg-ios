@@ -62,6 +62,7 @@ struct MainTabView: View {
         .sheet(item: Binding(get: { app.stickerLink }, set: { app.stickerLink = $0 })) { StickerSetSheet(ref: $0) }
         .sheet(item: Binding(get: { app.qrApproval }, set: { app.qrApproval = $0 })) { QrApproveSheet(link: $0) }
         .modifier(CallPresentation(calls: services.calls))
+        .modifier(GroupCallPresentation(calls: services.groupCalls))
     }
 
     @ViewBuilder

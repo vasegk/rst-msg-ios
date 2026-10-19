@@ -38,6 +38,7 @@ final class Services {
     let stickers: StickerStore
     let stories: StoryStore
     let calls: CallService
+    let groupCalls: GroupCallService
 
     init() {
         let session = SessionStore()
@@ -64,7 +65,12 @@ final class Services {
         let attachments = self.attachments
         self.stories = StoryStore(api: api, userKeys: userKeys, attachments: attachments, socket: socket,
                                   me: { session.username ?? "" })
-        self.calls = CallService(api: api, socket: socket)
+        let calls = CallService(api: api, socket: socket)
+        let groupCalls = GroupCallService(api: api, socket: socket, me: { session.username ?? "" })
+        // Два разговора разом — это два микрофона на одном человеке
+        calls.otherCallActive = { [weak groupCalls] in groupCalls?.isActive ?? false }
+        self.calls = calls
+        self.groupCalls = groupCalls
     }
 
     var me: String { session.username ?? "" }
@@ -221,6 +227,7 @@ final class AppModel {
     /// Всё, что относится к одному аккаунту, кроме самого сеанса.
     private func clearCaches() {
         services.calls.hangup()
+        services.groupCalls.leave()
         services.socket.disconnect()
         services.keyCache.clear()
         services.userKeys.clear()

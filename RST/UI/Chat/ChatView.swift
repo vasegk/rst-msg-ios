@@ -82,6 +82,7 @@ private struct ChatContent: View {
     var body: some View {
         VStack(spacing: 0) {
             ConnectionBanner()
+            if model.isGroup { GroupCallBanner(chatId: model.chatId) }
             banners
             if !model.pinned.isEmpty { pinnedBar }
             if model.isProtected && screenCaptured {
@@ -160,6 +161,10 @@ private struct ChatContent: View {
                             .disabled(services.calls.isBusy)
                         Button { services.calls.call(model.chatId, video: true) } label: { Label("Видеозвонок", systemImage: "video") }
                             .disabled(services.calls.isBusy)
+                    }
+                    if model.isGroup && !model.isChannel {
+                        Button { services.groupCalls.join(model.chatId) } label: { Label("Звонок в группе", systemImage: "phone.arrow.up.right") }
+                            .disabled(services.calls.isBusy || services.groupCalls.isActive)
                     }
                     Button { searchQuery = "" } label: { Label("Поиск в переписке", systemImage: "magnifyingglass") }
                     Button { showMedia = true } label: { Label("Вложения", systemImage: "photo.on.rectangle") }

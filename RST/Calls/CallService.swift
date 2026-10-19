@@ -36,6 +36,8 @@ final class CallService {
     var minimized = false
     /// Только что закончился: короткое сообщение (не ответил, занят…).
     var notice: String?
+    /// Идёт групповой звонок — входящий получает «занят».
+    @ObservationIgnored var otherCallActive: () -> Bool = { false }
     private(set) var localVideo: RTCVideoTrack?
     private(set) var remoteVideo: RTCVideoTrack?
 
@@ -88,7 +90,7 @@ final class CallService {
     // MARK: - Исходящий
 
     func call(_ username: String, video: Bool) {
-        guard phase == .idle else { return }
+        guard phase == .idle, !otherCallActive() else { return }
         peer = username
         isCaller = true
         wantVideo = video
@@ -287,7 +289,7 @@ final class CallService {
         if type != "call_invite" && sender != peer { return }
         switch type {
         case "call_invite":
-            guard phase == .idle else {
+            guard phase == .idle, !otherCallActive() else {
                 _ = socket.sendObject(["action": .string("rtc_signaling"), "receiver": .string(sender),
                                        "data": .object(["type": .string("call_busy")])])
                 return
