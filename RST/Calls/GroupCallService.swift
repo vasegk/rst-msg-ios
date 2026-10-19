@@ -175,7 +175,7 @@ final class GroupCallService {
     func toggleCamera() {
         Task {
             if cameraOn {
-                capturer?.stopCapture()
+                await capturer?.stopCapture()
                 cameraOn = false
                 for c in connections.values { c.videoSender?.track = nil }
                 sendMediaState()
