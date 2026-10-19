@@ -115,7 +115,7 @@ final class AttachmentRepository {
     // MARK: - Подготовка фото
 
     /// Фото перед отправкой: длинная сторона до 2560, JPEG 0.85 — как сжатие в вебе.
-    static func compressImage(_ data: Data, maxSide: CGFloat = 2560, quality: CGFloat = 0.85) -> Data? {
+    nonisolated static func compressImage(_ data: Data, maxSide: CGFloat = 2560, quality: CGFloat = 0.85) -> Data? {
         guard let image = UIImage(data: data) else { return nil }
         let size = image.size
         let scale = min(1, maxSide / max(size.width, size.height))
@@ -128,7 +128,7 @@ final class AttachmentRepository {
         return rendered.jpegData(compressionQuality: quality)
     }
 
-    static func mimeType(forExtension ext: String) -> String {
+    nonisolated static func mimeType(forExtension ext: String) -> String {
         UTType(filenameExtension: ext.lowercased())?.preferredMIMEType ?? "application/octet-stream"
     }
 }
