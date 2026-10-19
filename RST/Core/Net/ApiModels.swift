@@ -1021,3 +1021,42 @@ struct DraftDto: Decodable {
 struct DraftsResponse: Decodable { let drafts: [DraftDto]? }
 
 struct EmptyBody: Encodable {}
+
+// MARK: - Стикеры
+
+struct StickerDto: Decodable, Identifiable, Hashable {
+    let id: Int64
+    let fileUrl: String
+    let emoji: String?
+    enum CodingKeys: String, CodingKey {
+        case id, emoji
+        case fileUrl = "file_url"
+    }
+}
+
+struct StickerSetDto: Decodable, Identifiable {
+    let id: Int64
+    let name: String
+    let title: String
+    let mine: Bool?
+    let installed: Bool?
+    var stickers: [StickerDto]
+}
+
+struct StickerSetsResponse: Decodable { let sets: [StickerSetDto]? }
+
+struct StickerLookupResponse: Decodable { let name: String }
+
+struct StickerSetCreateRequest: Encodable {
+    let title: String
+    let name: String
+}
+
+struct StickerAddRequest: Encodable {
+    let fileUrl: String
+    let emoji: String
+    enum CodingKeys: String, CodingKey {
+        case emoji
+        case fileUrl = "file_url"
+    }
+}

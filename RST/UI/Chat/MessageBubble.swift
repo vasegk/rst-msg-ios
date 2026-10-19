@@ -102,6 +102,7 @@ struct MessageRow: View {
                 footer.padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(Color.black.opacity(0.35)))
             }
             .onTapGesture(count: 2) { model.react(message, "👍") }
+            .onTapGesture { onAction(.stickerSet(sticker)) }
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 if showSender && isGroup && !message.isMine && !isChannel {

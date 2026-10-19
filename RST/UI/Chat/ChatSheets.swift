@@ -9,6 +9,7 @@ enum MessageAction {
     case readers(ChatMessage)
     case hashtag(String)
     case anyReaction(ChatMessage)
+    case stickerSet(String)
 }
 
 // MARK: - Любая реакция
@@ -18,6 +19,7 @@ struct EmojiPickerSheet: View {
     var onPick: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var custom = ""
+    @State private var stickers = false
 
     private struct EmojiGroup: Identifiable {
         let title: String
@@ -36,18 +38,30 @@ struct EmojiPickerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        TextField("Любой эмодзи", text: $custom)
-                            .textFieldStyle(.roundedBorder)
-                        Button("OK") { pick(custom) }
-                            .disabled(!Self.isSingleEmoji(custom))
+                    Picker("", selection: $stickers) {
+                        Text("Эмодзи").tag(false)
+                        Text("Стикеры").tag(true)
                     }
-                    ForEach(Self.groups) { group in
-                        Text(group.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 8) {
-                            ForEach(Array(group.emojis.enumerated()), id: \.offset) { _, emoji in
-                                Button { pick(emoji) } label: { Text(emoji).font(.system(size: 28)) }
-                                    .buttonStyle(.plain)
+                    .pickerStyle(.segmented)
+                    if stickers {
+                        StickerReactionGrid { value in
+                            dismiss()
+                            onPick(value)
+                        }
+                    } else {
+                        HStack {
+                            TextField("Любой эмодзи", text: $custom)
+                                .textFieldStyle(.roundedBorder)
+                            Button("OK") { pick(custom) }
+                                .disabled(!Self.isSingleEmoji(custom))
+                        }
+                        ForEach(Self.groups) { group in
+                            Text(group.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 8) {
+                                ForEach(Array(group.emojis.enumerated()), id: \.offset) { _, emoji in
+                                    Button { pick(emoji) } label: { Text(emoji).font(.system(size: 28)) }
+                                        .buttonStyle(.plain)
+                                }
                             }
                         }
                     }

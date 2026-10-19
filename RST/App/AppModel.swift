@@ -35,6 +35,7 @@ final class Services {
     let attachments: AttachmentRepository
     let auth: AuthRepository
     let chats: ChatListStore
+    let stickers: StickerStore
 
     init() {
         let session = SessionStore()
@@ -57,6 +58,7 @@ final class Services {
         self.attachments = AttachmentRepository(api: api)
         self.auth = AuthRepository(api: api, session: session, userKeys: userKeys)
         self.chats = ChatListStore(api: api, session: session, socket: socket, messages: messages, userKeys: userKeys)
+        self.stickers = StickerStore(api: api)
     }
 
     var me: String { session.username ?? "" }
@@ -182,6 +184,7 @@ final class AppModel {
         services.attachments.clear()
         services.messages.clearOutbox()
         services.chats.clear()
+        services.stickers.clear()
         services.session.clear()
     }
 
@@ -232,6 +235,12 @@ final class AppModel {
             Task { await previewInvite(invite) }
             return
         }
+        // Ссылка на набор стикеров: /chat?stickers=имя
+        if let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first(where: { $0.name == "stickers" })?.value, StickerStore.isValidName(name) {
+            stickerLink = StickerSetRef(name: name)
+            return
+        }
         let path = url.path
         if path.hasPrefix("/@") {
             pendingChat = String(path.dropFirst(2))
@@ -239,6 +248,8 @@ final class AppModel {
     }
 
     var joinError: String?
+    /// Набор стикеров, открытый по ссылке.
+    var stickerLink: StickerSetRef?
     /// Короткое сообщение о заявке (отправлена, одобрена, отклонена).
     var joinNotice: String?
 

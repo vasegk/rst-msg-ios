@@ -325,6 +325,40 @@ final class RstApi {
         try await send("POST", "/api/groups/promote", GroupMemberActionRequest(groupId: groupId, targetUsername: username, role: role))
     }
 
+    // MARK: - Стикеры (routers/stickers.py)
+
+    /// Добавленные себе наборы (свои — тоже).
+    func stickerSets() async throws -> StickerSetsResponse { try await get("/api/stickers") }
+
+    func stickerSet(name: String) async throws -> StickerSetDto { try await get("/api/stickers/sets/\(path(name))") }
+
+    /// Имя набора по картинке стикера — открыть набор из переписки.
+    func stickerLookup(fileUrl: String) async throws -> StickerLookupResponse {
+        try await get("/api/stickers/lookup?file_url=\(queryEncoded(fileUrl))")
+    }
+
+    func createStickerSet(title: String, name: String) async throws -> StickerSetDto {
+        try await post("/api/stickers/sets", StickerSetCreateRequest(title: title, name: name))
+    }
+
+    func addSticker(setId: Int64, fileUrl: String, emoji: String) async throws -> StickerDto {
+        try await post("/api/stickers/sets/\(setId)/stickers", StickerAddRequest(fileUrl: fileUrl, emoji: emoji))
+    }
+
+    func removeSticker(setId: Int64, stickerId: Int64) async throws {
+        try await send("DELETE", "/api/stickers/sets/\(setId)/stickers/\(stickerId)", Optional<EmptyBody>.none)
+    }
+
+    func deleteStickerSet(id: Int64) async throws { try await send("DELETE", "/api/stickers/sets/\(id)", Optional<EmptyBody>.none) }
+
+    func installStickerSet(id: Int64, install: Bool) async throws {
+        if install {
+            try await send("POST", "/api/stickers/sets/\(id)/install", EmptyBody())
+        } else {
+            try await send("DELETE", "/api/stickers/sets/\(id)/install", Optional<EmptyBody>.none)
+        }
+    }
+
     // MARK: - Внутреннее
 
     private static let retryPauses: [UInt64] = [1_500, 3_500]

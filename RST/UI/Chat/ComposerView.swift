@@ -18,6 +18,7 @@ struct ComposerView: View {
     @State private var showSchedule = false
     @State private var showContactPicker = false
     @State private var showLocation = false
+    @State private var showStickers = false
     @Environment(Services.self) private var services
     @FocusState private var focused: Bool
 
@@ -92,6 +93,7 @@ struct ComposerView: View {
             if case .success(let urls) = result { Task { await sendFiles(urls) } }
         }
         .sheet(isPresented: $showPoll) { PollComposer(model: model) }
+        .sheet(isPresented: $showStickers) { StickerPanelSheet { model.sendSticker($0) } }
         .sheet(isPresented: $showSchedule) {
             TimePickerSheet(title: "Отправить позже") { date in model.scheduleCurrent(at: date) }
         }
@@ -214,6 +216,12 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(focused ? Theme.accent.opacity(0.7) : Theme.outline))
 
             if model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.editing == nil {
+                Button { showStickers = true } label: {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 21))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 34, height: 44)
+                }
                 Button { Task { await startRecording() } } label: {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 20))

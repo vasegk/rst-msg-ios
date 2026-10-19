@@ -106,4 +106,22 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual(poll.counts, [1, 0])
         XCTAssertEqual(poll.my, [0])
     }
+
+    /// set_view из routers/stickers.py и подписи, как в js/stickers.js.
+    func testStickerSetDecodesAndHelpers() throws {
+        let raw = #"{"sets":[{"id":7,"name":"cats","title":"Коты","mine":false,"installed":true,"stickers":[{"id":1,"file_url":"/uploads/0123456789abcdef0123456789abcdef.webp","emoji":"😺"}]}]}"#
+        let sets = try JSONDecoder().decode(StickerSetsResponse.self, from: Data(raw.utf8)).sets ?? []
+        XCTAssertEqual(sets.first?.stickers.first?.fileUrl, "/uploads/0123456789abcdef0123456789abcdef.webp")
+        XCTAssertEqual(sets.first?.installed, true)
+        XCTAssertEqual(StickerStore.caption("😺"), "😺 Стикер")
+        XCTAssertEqual(StickerStore.caption(""), "Стикер")
+        XCTAssertEqual(StickerStore.suggestName("Мои коты!"), "moi_koty")
+        XCTAssertTrue(StickerStore.isValidName("moi_koty"))
+        XCTAssertFalse(StickerStore.isValidName("ab"))
+        XCTAssertEqual(StickerStore.countText(1), "1 стикер")
+        XCTAssertEqual(StickerStore.countText(3), "3 стикера")
+        XCTAssertEqual(StickerStore.countText(12), "12 стикеров")
+        let body = try JSONCoding.encodeData(StickerAddRequest(fileUrl: "/uploads/a.png", emoji: "🙂"))
+        XCTAssertTrue(String(decoding: body, as: UTF8.self).contains(#""file_url":"/uploads/a.png""#))
+    }
 }

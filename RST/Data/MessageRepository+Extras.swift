@@ -33,6 +33,16 @@ extension MessageRepository {
         if !sent { throw NotConnectedError() }
     }
 
+    /// Стикер: картинка открыта (file_url набора), подпись — эмодзи стикера — шифруется.
+    func sendSticker(_ chatId: String, sticker: StickerDto, replyTo: Int64? = nil) async throws {
+        let keys = try await sendKeys(for: chatId)
+        let content = try MessageCrypto.encryptText(keys, StickerStore.caption(sticker.emoji))
+        guard socket.sendMessage(receiver: chatId, content: content, fileUrl: sticker.fileUrl,
+                                 fileType: MessageDto.fileTypeSticker, replyTo: replyTo) else {
+            throw NotConnectedError()
+        }
+    }
+
     /// Поделиться контактом: текст для старых клиентов, карточка — полем c.
     func shareContact(_ chatId: String, contact: ContactRef) async throws {
         let keys = try await sendKeys(for: chatId)

@@ -60,6 +60,7 @@ private struct ChatContent: View {
     @State private var showTimer = false
     @State private var forwardingSelection = false
     @State private var anyReactionOf: ChatMessage?
+    @State private var stickerSetRef: StickerSetRef?
     @State private var showMedia = false
     @State private var viewOnceImage: UIImage?
     @State private var viewOnceVideo: URL?
@@ -107,6 +108,7 @@ private struct ChatContent: View {
             ChatSearchSheet(model: model, query: searchQuery ?? "") { id in model.jump(to: id) }
         }
         .sheet(isPresented: $showScheduled) { ScheduledListSheet(model: model) }
+        .sheet(item: $stickerSetRef) { StickerSetSheet(ref: $0) }
         .sheet(item: $anyReactionOf) { message in
             EmojiPickerSheet { emoji in model.react(message, emoji) }
         }
@@ -237,6 +239,7 @@ private struct ChatContent: View {
         case .readers(let m): readersOf = m
         case .hashtag(let tag): searchQuery = "#" + tag
         case .anyReaction(let m): anyReactionOf = m
+        case .stickerSet(let file): stickerSetRef = StickerSetRef(fileUrl: file)
         }
     }
 

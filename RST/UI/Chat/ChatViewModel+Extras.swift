@@ -113,6 +113,14 @@ extension ChatViewModel {
 
     // MARK: - Контакт, ответ в другом чате и лично
 
+    func sendSticker(_ sticker: StickerDto) {
+        let reply = replyTo?.id
+        replyTo = nil
+        Task {
+            do { try await services.messages.sendSticker(chatId, sticker: sticker, replyTo: reply) } catch { toast = errorText(error) }
+        }
+    }
+
     func shareContact(_ contact: ContactRef) {
         Task {
             do { try await services.messages.shareContact(chatId, contact: contact) } catch { toast = errorText(error) }

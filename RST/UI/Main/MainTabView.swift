@@ -58,6 +58,7 @@ struct MainTabView: View {
             JoinConfirmSheet(offer: offer)
                 .presentationDetents([.medium])
         }
+        .sheet(item: Binding(get: { app.stickerLink }, set: { app.stickerLink = $0 })) { StickerSetSheet(ref: $0) }
     }
 
     @ViewBuilder
