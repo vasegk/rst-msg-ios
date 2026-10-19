@@ -12,7 +12,7 @@ struct ComposerView: View {
     @State private var showPhotos = false
     @State private var showFiles = false
     @State private var showPoll = false
-    @State private var recorder = VoiceRecorder()
+    @State private var rec = RecordingController()
     /// Выбрано одно фото/видео — спросить: обычное, под спойлером, одноразовое.
     @State private var singleVisual: ChatViewModel.OutgoingFile?
     @State private var showSchedule = false
@@ -77,12 +77,28 @@ struct ComposerView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Theme.surface.opacity(0.95))
-            } else if recorder.isRecording {
-                recordingBar
             } else {
-                inputBar
+                if rec.circle.isRecording { CircleRecordingPreview(circle: rec.circle) }
+                if rec.locked && rec.isRecording {
+                    recordingBar
+                } else {
+                    inputBar
+                }
             }
         }
+        .onAppear {
+            rec.onError = { model.toast = $0 }
+            rec.onFinish = { mode, url, duration in
+                Task {
+                    if mode == .circle {
+                        await model.sendVideoNote(url: url, duration: duration)
+                    } else {
+                        await model.sendVoice(url: url, duration: duration)
+                    }
+                }
+            }
+        }
+        .onDisappear { if rec.isRecording { rec.cancel() } }
         .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 10, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
@@ -190,90 +206,100 @@ struct ComposerView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Menu {
-                Button { showPhotos = true } label: { Label("Фото или видео", systemImage: "photo.on.rectangle") }
-                Button { showFiles = true } label: { Label("Файл", systemImage: "doc") }
-                Button { showContactPicker = true } label: { Label("Контакт", systemImage: "person.crop.circle") }
-                Button { showLocation = true } label: { Label("Местоположение", systemImage: "location") }
-                if model.isGroup || !model.isSaved {
-                    Button { showPoll = true } label: { Label("Опрос", systemImage: "chart.bar.xaxis") }
-                }
-            } label: {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 22))
-                    .foregroundStyle(Theme.muted)
-                    .frame(width: 40, height: 44)
-            }
-            .disabled(model.editing != nil)
-
-            TextField("Сообщение", text: Binding(get: { model.text }, set: { model.updateText($0) }), axis: .vertical)
-                .lineLimit(1...7)
-                .focused($focused)
-                .font(.system(size: 16))
-                .padding(.horizontal, 15)
-                .padding(.vertical, 11)
-                .background(Theme.input, in: RoundedRectangle(cornerRadius: 22))
-                .overlay(RoundedRectangle(cornerRadius: 22).stroke(focused ? Theme.accent.opacity(0.7) : Theme.outline))
-
-            if model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.editing == nil {
-                Button { showStickers = true } label: {
-                    Image(systemName: "face.smiling")
-                        .font(.system(size: 21))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 34, height: 44)
-                }
-                Button { Task { await startRecording() } } label: {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44)
-                }
-                .disabled(model.sending)
+            if rec.holding {
+                RecordingHoldIndicator(rec: rec)
             } else {
-                Button { model.send() } label: {
-                    ZStack {
-                        Circle().fill(Theme.accent).frame(width: 44, height: 44)
-                            .shadow(color: Theme.accent.opacity(0.3), radius: 4, y: 2)
-                        if model.sending {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: model.editing != nil ? "checkmark" : "arrow.up")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                }
-                .disabled(model.sending)
-                // Удержание «Отправить» — отложить или «когда будет в сети»
-                .contextMenu {
-                    if model.editing == nil {
-                        Button { showSchedule = true } label: { Label("Отправить позже", systemImage: "clock") }
-                        if model.canSendWhenOnline {
-                            Button { model.sendWhenOnline() } label: { Label("Когда будет в сети", systemImage: "person.badge.clock") }
-                        }
-                    }
-                }
+                inputFields
             }
+            actionButton
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
 
+    @ViewBuilder
+    private var inputFields: some View {
+        Menu {
+            Button { showPhotos = true } label: { Label("Фото или видео", systemImage: "photo.on.rectangle") }
+            Button { showFiles = true } label: { Label("Файл", systemImage: "doc") }
+            Button { showContactPicker = true } label: { Label("Контакт", systemImage: "person.crop.circle") }
+            Button { showLocation = true } label: { Label("Местоположение", systemImage: "location") }
+            if model.isGroup || !model.isSaved {
+                Button { showPoll = true } label: { Label("Опрос", systemImage: "chart.bar.xaxis") }
+            }
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.system(size: 22))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 40, height: 44)
+        }
+        .disabled(model.editing != nil)
+
+        TextField("Сообщение", text: Binding(get: { model.text }, set: { model.updateText($0) }), axis: .vertical)
+            .lineLimit(1...7)
+            .focused($focused)
+            .font(.system(size: 16))
+            .padding(.horizontal, 15)
+            .padding(.vertical, 11)
+            .background(Theme.input, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).stroke(focused ? Theme.accent.opacity(0.7) : Theme.outline))
+
+        if model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.editing == nil {
+            Button { showStickers = true } label: {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 21))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 34, height: 44)
+            }
+        }
+    }
+
+    /// Справа: запись (голосовое или кружок) или «Отправить».
+    @ViewBuilder
+    private var actionButton: some View {
+        if rec.holding || (model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.editing == nil) {
+            RecordButton(rec: rec)
+                .disabled(model.sending)
+        } else {
+            Button { model.send() } label: {
+                ZStack {
+                    Circle().fill(Theme.accent).frame(width: 44, height: 44)
+                        .shadow(color: Theme.accent.opacity(0.3), radius: 4, y: 2)
+                    if model.sending {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: model.editing != nil ? "checkmark" : "arrow.up")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .disabled(model.sending)
+            // Удержание «Отправить» — отложить или «когда будет в сети»
+            .contextMenu {
+                if model.editing == nil {
+                    Button { showSchedule = true } label: { Label("Отправить позже", systemImage: "clock") }
+                    if model.canSendWhenOnline {
+                        Button { model.sendWhenOnline() } label: { Label("Когда будет в сети", systemImage: "person.badge.clock") }
+                    }
+                }
+            }
+        }
+    }
+
     private var recordingBar: some View {
         HStack(spacing: 14) {
-            Button { recorder.cancel() } label: {
+            Button { rec.cancel() } label: {
                 Image(systemName: "trash").font(.system(size: 20)).foregroundStyle(Theme.danger).frame(width: 44, height: 44)
             }
-            Circle().fill(Theme.danger).frame(width: 10, height: 10).opacity(recorder.blink ? 1 : 0.3)
-            Text(recorder.elapsedText).font(.system(size: 16, weight: .medium).monospacedDigit())
+            Circle().fill(Theme.danger).frame(width: 10, height: 10).opacity(rec.voice.blink || rec.circle.blink ? 1 : 0.3)
+            Text(rec.elapsedText).font(.system(size: 16, weight: .medium).monospacedDigit())
+            if rec.activeMode == .voice {
+                LevelBars(levels: rec.voice.levels).frame(height: 22)
+            }
             Spacer()
-            Text("Запись…").foregroundStyle(Theme.muted).font(.system(size: 14))
-            Button {
-                if let result = recorder.finish() {
-                    Task { await model.sendVoice(url: result.0, duration: result.1) }
-                }
-            } label: {
+            Button { rec.finish() } label: {
                 ZStack {
                     Circle().fill(Theme.accent).frame(width: 44, height: 44)
                     Image(systemName: "arrow.up").font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
@@ -286,14 +312,6 @@ struct ComposerView: View {
     }
 
     // MARK: - Действия
-
-    private func startRecording() async {
-        do {
-            try await recorder.start()
-        } catch {
-            model.toast = errorText(error)
-        }
-    }
 
     private func sendPhotos(_ items: [PhotosPickerItem]) async {
         var files: [ChatViewModel.OutgoingFile] = []
@@ -346,78 +364,6 @@ struct ComposerView: View {
         let caption = viewOnce ? "" : model.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !caption.isEmpty { model.updateText("") }
         await model.sendFiles(files, caption: caption, spoiler: spoiler, viewOnce: viewOnce)
-    }
-}
-
-/// Запись голосового: AAC в m4a, как приложение Android (audio/mp4).
-@MainActor
-@Observable
-final class VoiceRecorder {
-    private(set) var isRecording = false
-    private(set) var elapsed: TimeInterval = 0
-    private(set) var blink = false
-    @ObservationIgnored private var recorder: AVAudioRecorder?
-    @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var url: URL?
-
-    var elapsedText: String {
-        let s = Int(elapsed)
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
-
-    func start() async throws {
-        let granted = await AVAudioApplication.requestRecordPermission()
-        guard granted else {
-            throw CryptoError("Нет доступа к микрофону. Разрешите его в Настройках → RST.")
-        }
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth])
-        try session.setActive(true)
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("voice_\(Int(Date().timeIntervalSince1970)).m4a")
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64000,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ]
-        let rec = try AVAudioRecorder(url: file, settings: settings)
-        guard rec.record() else { throw CryptoError("Не удалось начать запись") }
-        recorder = rec
-        url = file
-        elapsed = 0
-        isRecording = true
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let recorder = self.recorder else { return }
-                self.elapsed = recorder.currentTime
-                self.blink.toggle()
-            }
-        }
-    }
-
-    /// Остановить и вернуть файл с длительностью.
-    func finish() -> (URL, TimeInterval)? {
-        guard let recorder, let url else { return nil }
-        let duration = recorder.currentTime
-        recorder.stop()
-        reset()
-        return (url, duration)
-    }
-
-    func cancel() {
-        recorder?.stop()
-        recorder?.deleteRecording()
-        reset()
-    }
-
-    private func reset() {
-        timer?.invalidate()
-        timer = nil
-        recorder = nil
-        url = nil
-        isRecording = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
 

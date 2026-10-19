@@ -487,6 +487,29 @@ final class ChatViewModel {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Кружок: обычное видео-вложение с подписью «📹 Видеосообщение», как в вебе.
+    func sendVideoNote(url: URL, duration: TimeInterval) async {
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard duration >= 1, let data = try? Data(contentsOf: url) else {
+            toast = duration < 1 ? "Слишком короткий кружок" : "Не удалось прочитать запись"
+            return
+        }
+        await sendAttachment(data: data, fileName: "video_msg.mp4", mimeType: "video/mp4", caption: Previews.videoNote, compress: false)
+    }
+
+    /// Голосовое или кружок, которое заиграет само (дослушали предыдущее).
+    var autoplayId: Int64?
+
+    /// Дослушали — следующее голосовое или кружок ниже в ленте играет само.
+    func playNext(after message: ChatMessage) {
+        guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return }
+        let next = messages[(index + 1)...].first { m in
+            guard let a = m.attachment, !m.undecryptable else { return false }
+            return (a.isAudio && m.text == Previews.voiceText) || (a.isVideo && m.text == Previews.videoNote)
+        }
+        autoplayId = next?.id
+    }
+
     func sendPoll(_ spec: MessageRepository.PollSpec) async -> Bool {
         do {
             try await services.messages.sendPoll(chatId, spec: spec)

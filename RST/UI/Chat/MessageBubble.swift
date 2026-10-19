@@ -220,15 +220,27 @@ struct MessageRow: View {
         return (a.isAudio && message.text == Previews.voiceText) || (a.isVideo && message.text == Previews.videoNote)
     }
 
+    /// Начали слушать: отметить и снять «играет само».
+    private func played() {
+        model.markPlayed(message)
+        if model.autoplayId == message.id { model.autoplayId = nil }
+    }
+
     @ViewBuilder
     private func attachmentView(_ a: Attachment) -> some View {
         if a.isImage {
             EncryptedImageView(attachment: a, onOpen: onOpenImage)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         } else if a.isAudio {
-            VoiceMessageView(attachment: a, isMine: message.isMine, played: message.played) { model.markPlayed(message) }
+            VoiceMessageView(attachment: a, isMine: message.isMine, played: message.played,
+                             autoplay: model.autoplayId == message.id,
+                             onPlayed: played, onFinished: { model.playNext(after: message) })
+        } else if a.isVideo && message.text == Previews.videoNote {
+            RoundVideoView(attachment: a, played: message.played, isMine: message.isMine,
+                           autoplay: model.autoplayId == message.id,
+                           onPlayed: played, onFinished: { model.playNext(after: message) })
         } else if a.isVideo {
-            VideoAttachmentView(attachment: a, round: message.text == Previews.videoNote) { model.markPlayed(message) }
+            VideoAttachmentView(attachment: a) { model.markPlayed(message) }
         } else {
             FileAttachmentView(attachment: a, isMine: message.isMine)
         }

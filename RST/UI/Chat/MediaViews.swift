@@ -312,6 +312,9 @@ final class VoicePlayback {
     private(set) var progress: Double = 0
     private(set) var duration: Double = 0
     var rate: Float = 1
+    /// Что дослушали до конца (не остановили): по нему играет следующее.
+    private(set) var finishedKey: String?
+    private(set) var finishCount = 0
 
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var timer: Timer?
@@ -319,7 +322,13 @@ final class VoicePlayback {
 
     init() {
         finishDelegate.onFinish = { [weak self] in
-            Task { @MainActor in self?.stop() }
+            Task { @MainActor in
+                guard let self else { return }
+                let key = self.currentUrl
+                self.stop()
+                self.finishedKey = key
+                self.finishCount += 1
+            }
         }
     }
 
@@ -329,6 +338,7 @@ final class VoicePlayback {
             return
         }
         stop()
+        RoundPlayback.shared.stop()
         try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
         try AVAudioSession.sharedInstance().setActive(true)
         let p = try AVAudioPlayer(data: data)
@@ -381,7 +391,10 @@ struct VoiceMessageView: View {
     let attachment: Attachment
     var isMine = false
     var played = true
+    /// Дослушали предыдущее — это играет само.
+    var autoplay = false
     var onPlayed: () -> Void = {}
+    var onFinished: () -> Void = {}
 
     @Environment(Services.self) private var services
     @State private var busy = false
@@ -434,6 +447,12 @@ struct VoiceMessageView: View {
             }
         }
         .frame(minWidth: 220)
+        .onChange(of: playback.finishCount) {
+            if playback.finishedKey == attachment.fileUrl { onFinished() }
+        }
+        .onChange(of: autoplay, initial: true) { _, now in
+            if now && !isCurrent { toggle() }
+        }
     }
 
     private var rateLabel: String {
@@ -502,6 +521,177 @@ struct Waveform: View {
         return (0..<count).map { _ in
             h = h &* 6364136223846793005 &+ 1442695040888963407
             return 0.25 + CGFloat((h >> 33) % 1000) / 1000 * 0.75
+        }
+    }
+}
+
+// MARK: - Кружки
+
+/// Кружок играет прямо в ленте: по нажатию — со звуком с начала, повторное
+/// нажатие — пауза. Одновременно звучит что-то одно: голосовое или кружок.
+@MainActor
+@Observable
+final class RoundPlayback {
+    static let shared = RoundPlayback()
+
+    private(set) var currentKey: String?
+    private(set) var playing = false
+    private(set) var progress: Double = 0
+    private(set) var finishedKey: String?
+    private(set) var finishCount = 0
+    @ObservationIgnored private(set) var player: AVPlayer?
+    @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var endObserver: NSObjectProtocol?
+
+    func toggle(_ key: String, url: URL) {
+        if currentKey == key, let player {
+            if playing { player.pause() } else { player.play() }
+            playing.toggle()
+            return
+        }
+        stop()
+        VoicePlayback.shared.stop()
+        try? AVAudioSession.sharedInstance().setCategory(.playback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        player = p
+        currentKey = key
+        progress = 0
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self, let d = self.player?.currentItem?.duration.seconds, d.isFinite, d > 0 else { return }
+                self.progress = min(1, time.seconds / d)
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let key = self.currentKey
+                self.stop()
+                self.finishedKey = key
+                self.finishCount += 1
+            }
+        }
+        p.play()
+        playing = true
+    }
+
+    func stop() {
+        if let timeObserver { player?.removeTimeObserver(timeObserver) }
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        timeObserver = nil
+        endObserver = nil
+        player?.pause()
+        player = nil
+        currentKey = nil
+        playing = false
+        progress = 0
+    }
+}
+
+private struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    final class LayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+
+    func makeUIView(context: Context) -> LayerView {
+        let view = LayerView()
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: LayerView, context: Context) {
+        if uiView.playerLayer.player !== player { uiView.playerLayer.player = player }
+    }
+}
+
+/// Кружок в ленте: кадр, по нажатию — видео со звуком и кольцо прогресса.
+struct RoundVideoView: View {
+    let attachment: Attachment
+    var played = true
+    var isMine = false
+    var autoplay = false
+    var onPlayed: () -> Void = {}
+    var onFinished: () -> Void = {}
+    @Environment(Services.self) private var services
+    @State private var thumbnail: UIImage?
+    @State private var busy = false
+    @State private var error: String?
+    private var playback: RoundPlayback { RoundPlayback.shared }
+    private var isCurrent: Bool { playback.currentKey == attachment.fileUrl }
+    private static let size: CGFloat = 220
+
+    var body: some View {
+        ZStack {
+            if isCurrent, let player = playback.player {
+                PlayerLayerView(player: player)
+            } else if let thumbnail {
+                Image(uiImage: thumbnail).resizable().scaledToFill()
+            } else {
+                Rectangle().fill(Color.black.opacity(0.35))
+            }
+            if isCurrent {
+                Circle()
+                    .trim(from: 0, to: playback.progress)
+                    .stroke(Color.white.opacity(0.9), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(3)
+            }
+            if busy {
+                ProgressView().tint(.white)
+            } else if !isCurrent || !playback.playing {
+                Circle().fill(Color.black.opacity(0.45)).frame(width: 52, height: 52)
+                Image(systemName: error == nil ? "play.fill" : "exclamationmark.triangle").font(.system(size: 22)).foregroundStyle(.white)
+            }
+        }
+        .frame(width: Self.size, height: Self.size)
+        .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            if !played && !isMine {
+                Circle().fill(Theme.accent).frame(width: 10, height: 10).offset(x: -18, y: -18)
+            }
+        }
+        .contentShape(Circle())
+        .onTapGesture(perform: toggle)
+        .task(id: attachment.fileUrl) { await prepareThumbnail() }
+        .onChange(of: playback.finishCount) {
+            if playback.finishedKey == attachment.fileUrl { onFinished() }
+        }
+        .onChange(of: autoplay, initial: true) { _, now in
+            if now && !isCurrent { toggle() }
+        }
+    }
+
+    private func prepareThumbnail() async {
+        guard let file = services.attachments.existingFileURL(for: attachment) else { return }
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 480, height: 480)
+        if let cg = try? await generator.image(at: .zero).image { thumbnail = UIImage(cgImage: cg) }
+    }
+
+    private func toggle() {
+        if isCurrent, let url = services.attachments.existingFileURL(for: attachment) {
+            playback.toggle(attachment.fileUrl, url: url)
+            return
+        }
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                let url = try await services.attachments.fileURL(for: attachment)
+                playback.toggle(attachment.fileUrl, url: url)
+                onPlayed()
+                if thumbnail == nil { await prepareThumbnail() }
+            } catch {
+                self.error = errorText(error)
+            }
         }
     }
 }
