@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct ChatView: View {
     let chatId: String
+    /// Тема форума — лента только её.
+    var topic: ForumTopic? = nil
 
     @Environment(Services.self) private var services
     @Environment(ChatListStore.self) private var store
@@ -20,7 +22,9 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            if model == nil { model = ChatViewModel(chatId: chatId, services: services) }
+            if model == nil { model = ChatViewModel(chatId: chatId, services: services, topic: topic) }
+            // Сообщения в эту группу уходят с номером темы
+            if let topic { services.socket.currentTopic = (chatId, topic.id) }
             model?.visible = scenePhase == .active
             store.markOpened(chatId)
             model?.markVisibleRead()
@@ -28,6 +32,9 @@ struct ChatView: View {
         .onDisappear {
             model?.visible = false
             store.markClosed(chatId)
+            if let topic, let current = services.socket.currentTopic, current.chat == chatId, current.id == topic.id {
+                services.socket.currentTopic = nil
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             model?.visible = phase == .active
@@ -62,6 +69,7 @@ private struct ChatContent: View {
     @State private var anyReactionOf: ChatMessage?
     @State private var stickerSetRef: StickerSetRef?
     @State private var showMedia = false
+    @State private var commentsOf: ChatMessage?
     @State private var viewOnceImage: UIImage?
     @State private var viewOnceVideo: URL?
     @Environment(AppModel.self) private var app
@@ -109,6 +117,9 @@ private struct ChatContent: View {
         }
         .sheet(isPresented: $showScheduled) { ScheduledListSheet(model: model) }
         .sheet(item: $stickerSetRef) { StickerSetSheet(ref: $0) }
+        .sheet(item: $commentsOf) { post in
+            CommentsSheet(chatId: model.chatId, post: post, canModerate: ["owner", "admin"].contains(model.myRole))
+        }
         .sheet(item: $anyReactionOf) { message in
             EmojiPickerSheet { emoji in model.react(message, emoji) }
         }
@@ -239,6 +250,7 @@ private struct ChatContent: View {
         case .readers(let m): readersOf = m
         case .hashtag(let tag): searchQuery = "#" + tag
         case .anyReaction(let m): anyReactionOf = m
+        case .comments(let m): commentsOf = m
         case .stickerSet(let file): stickerSetRef = StickerSetRef(fileUrl: file)
         }
     }

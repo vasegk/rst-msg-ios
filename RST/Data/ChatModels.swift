@@ -27,6 +27,8 @@ struct ChatMessage: Identifiable, Equatable {
     var quote: String?
     var isAutoreply = false
     var stickerUrl: String?
+    /// Комментариев к посту канала.
+    var commentCount = 0
     var live: LiveGeo?
     var storyRef: StoryRef?
     /// Ждёт отправки (нет связи) — рисуется с часиками.

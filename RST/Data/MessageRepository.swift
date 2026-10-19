@@ -162,8 +162,8 @@ final class MessageRepository {
 
     /// Сервер отдаёт последние limit сообщений по порядку; для подгрузки
     /// вверх передаётся before_id = oldest_id.
-    func history(_ chatId: String, beforeId: Int64? = nil, limit: Int = 100) async throws -> History {
-        let response = try await api.messages(me: me, peer: chatId, limit: limit, beforeId: beforeId)
+    func history(_ chatId: String, beforeId: Int64? = nil, limit: Int = 100, topicId: Int64? = nil) async throws -> History {
+        let response = try await api.messages(me: me, peer: chatId, limit: limit, beforeId: beforeId, topicId: topicId)
         let keys = try await readKeys(for: chatId)
         let list = (response.messages ?? []).filter { $0.commentTo == nil }
         return History(messages: list.map { decrypt($0, keys: keys) }, hasMore: response.hasMore ?? false, oldestId: response.oldestId)
@@ -171,12 +171,12 @@ final class MessageRepository {
 
     /// Догнать пропущенное после перерыва: after_id отдаёт новее указанного
     /// от старых к новым, has_more — «ниже есть ещё».
-    func since(_ chatId: String, afterId: Int64) async throws -> [ChatMessage] {
+    func since(_ chatId: String, afterId: Int64, topicId: Int64? = nil) async throws -> [ChatMessage] {
         let keys = try await readKeys(for: chatId)
         var result: [ChatMessage] = []
         var cursor = afterId
         for _ in 0..<10 {
-            let page = try await api.messages(me: me, peer: chatId, limit: 200, afterId: cursor)
+            let page = try await api.messages(me: me, peer: chatId, limit: 200, afterId: cursor, topicId: topicId)
             let list = page.messages ?? []
             if list.isEmpty { break }
             result += list.filter { $0.commentTo == nil }.map { decrypt($0, keys: keys) }
@@ -184,6 +184,13 @@ final class MessageRepository {
             if page.hasMore != true { break }
         }
         return result
+    }
+
+    /// Комментарии к посту канала: обычные сообщения канала с comment_to.
+    func comments(_ chatId: String, post: Int64) async throws -> [ChatMessage] {
+        let response = try await api.messages(me: me, peer: chatId, limit: 200, commentTo: post)
+        let keys = try await readKeys(for: chatId)
+        return (response.messages ?? []).map { decrypt($0, keys: keys) }
     }
 
     func pinned(_ chatId: String) async throws -> [ChatMessage] {
@@ -431,6 +438,7 @@ final class MessageRepository {
         )
         base.viewOnce = dto.viewOnce ?? false
         base.isReminder = dto.reminder ?? false
+        base.commentCount = dto.commentCount ?? 0
 
         // Системные записи — открытый текст, расшифровывать нечего
         if dto.isSystem {

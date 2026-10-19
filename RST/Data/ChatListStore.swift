@@ -278,7 +278,7 @@ final class ChatListStore {
                 $0.emojiStatusUntil = until
             }
             emojiStatuses[username] = emoji.isEmpty ? nil : EmojiStatus(emoji: emoji, until: until)
-        case "join_request_done", "view_once_opened":
+        case "join_request_done", "view_once_opened", "group_forum":
             scheduleRefresh()
         default:
             break

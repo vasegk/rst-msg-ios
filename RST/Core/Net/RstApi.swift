@@ -156,10 +156,15 @@ final class RstApi {
 
     // MARK: - Сообщения
 
-    func messages(me: String, peer: String, limit: Int = 200, beforeId: Int64? = nil, afterId: Int64? = nil) async throws -> MessagesResponse {
+    /// topicId — переписка одной темы форума (0 — «Общее»); commentTo —
+    /// комментарии к посту канала.
+    func messages(me: String, peer: String, limit: Int = 200, beforeId: Int64? = nil, afterId: Int64? = nil,
+                  topicId: Int64? = nil, commentTo: Int64? = nil) async throws -> MessagesResponse {
         var query = "limit=\(limit)"
         if let beforeId { query += "&before_id=\(beforeId)" }
         if let afterId { query += "&after_id=\(afterId)" }
+        if let topicId { query += "&topic_id=\(topicId)" }
+        if let commentTo { query += "&comment_to=\(commentTo)" }
         return try await get("/api/messages/\(path(me))/\(path(peer))?\(query)")
     }
 
@@ -352,6 +357,26 @@ final class RstApi {
         try await get("/api/groups/\(path(groupId))/admin_log" + (before.map { "?before=\($0)" } ?? ""))
     }
 
+    // MARK: - Темы (routers/topics.py): номер группы без «group_»
+
+    func topics(groupNumber: String) async throws -> TopicsResponse { try await get("/api/groups/\(path(groupNumber))/topics") }
+
+    func setForum(groupNumber: String, enabled: Bool) async throws {
+        try await send("POST", "/api/groups/\(path(groupNumber))/forum", ForumToggleRequest(enabled: enabled))
+    }
+
+    func createTopic(groupNumber: String, title: String, icon: String) async throws -> ForumTopicDto {
+        try await post("/api/groups/\(path(groupNumber))/topics", TopicCreateRequest(title: title, icon: icon))
+    }
+
+    func updateTopic(groupNumber: String, id: Int64, _ request: TopicUpdateRequest) async throws {
+        try await send("PATCH", "/api/groups/\(path(groupNumber))/topics/\(id)", request)
+    }
+
+    func deleteTopic(groupNumber: String, id: Int64) async throws {
+        try await send("DELETE", "/api/groups/\(path(groupNumber))/topics/\(id)", Optional<EmptyBody>.none)
+    }
+
     // MARK: - Стикеры (routers/stickers.py)
 
     /// Добавленные себе наборы (свои — тоже).
@@ -516,4 +541,72 @@ enum ApiErrorText {
         default: return "Ошибка \(code)"
         }
     }
+}
+
+// MARK: - Темы
+
+/// Тема форума (list_topics в routers/topics.py); id 0 — «Общее».
+struct ForumTopicDto: Decodable, Identifiable {
+    let id: Int64
+    let title: String
+    let icon: String?
+    let closed: Bool?
+    let general: Bool?
+    let createdBy: String?
+    let lastMsg: MessageDto?
+    let unread: Int?
+    var topic: ForumTopic {
+        ForumTopic(id: id, title: title, icon: icon ?? "", closed: closed ?? false, general: general ?? false)
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, title, icon, closed, general, unread
+        case createdBy = "created_by"
+        case lastMsg = "last_msg"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int64.self, forKey: .id)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        icon = try? c.decodeIfPresent(String.self, forKey: .icon)
+        closed = try? c.decodeIfPresent(Bool.self, forKey: .closed)
+        general = try? c.decodeIfPresent(Bool.self, forKey: .general)
+        createdBy = try? c.decodeIfPresent(String.self, forKey: .createdBy)
+        lastMsg = try? c.decodeIfPresent(MessageDto.self, forKey: .lastMsg)
+        unread = try? c.decodeIfPresent(Int.self, forKey: .unread)
+    }
+}
+
+/// Открытая тема — для маршрута и экрана переписки.
+struct ForumTopic: Hashable {
+    let id: Int64
+    var title: String
+    var icon: String
+    var closed: Bool
+    var general: Bool
+}
+
+struct TopicsResponse: Decodable {
+    let forum: Bool?
+    let canManage: Bool?
+    let canCreate: Bool?
+    let topics: [ForumTopicDto]?
+    enum CodingKeys: String, CodingKey {
+        case forum, topics
+        case canManage = "can_manage"
+        case canCreate = "can_create"
+    }
+}
+
+struct ForumToggleRequest: Encodable { let enabled: Bool }
+
+struct TopicCreateRequest: Encodable {
+    let title: String
+    let icon: String
+}
+
+/// Правка темы: только заданные поля.
+struct TopicUpdateRequest: Encodable {
+    var title: String?
+    var icon: String?
+    var closed: Bool?
 }

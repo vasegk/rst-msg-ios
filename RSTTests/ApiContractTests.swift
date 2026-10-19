@@ -148,4 +148,18 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual(list.requests, 3)
         XCTAssertEqual(list.invites?.first?.isActive, false)
     }
+
+    /// list_topics из routers/topics.py: «Общее» первым, last_msg без receiver.
+    func testTopicsDecode() throws {
+        let raw = #"{"forum":true,"can_manage":false,"can_create":true,"topics":[{"id":0,"title":"Общее","icon":"","closed":false,"general":true,"created_by":null,"last_msg":null,"unread":0},{"id":7,"title":"Игры","icon":"🎮","closed":true,"general":false,"created_by":"ivan","last_msg":{"id":"55","sender":"ivan","content":"{\"iv\":\"a\",\"ciphertext\":\"b\"}","file_type":null,"file_url":null,"time":"2026-10-19T10:00:00"},"unread":3}]}"#
+        let page = try JSONDecoder().decode(TopicsResponse.self, from: Data(raw.utf8))
+        let topics = try XCTUnwrap(page.topics)
+        XCTAssertEqual(topics.count, 2)
+        XCTAssertEqual(topics[0].topic.general, true)
+        XCTAssertEqual(topics[1].topic, ForumTopic(id: 7, title: "Игры", icon: "🎮", closed: true, general: false))
+        XCTAssertEqual(topics[1].lastMsg?.id, 55)
+        XCTAssertEqual(topics[1].unread, 3)
+        XCTAssertEqual(CommentsSheet.countText(21), "21 комментарий")
+        XCTAssertEqual(CommentsSheet.countText(5), "5 комментариев")
+    }
 }

@@ -43,6 +43,15 @@ extension MessageRepository {
         }
     }
 
+    /// Комментарий к посту канала: кадр send с comment_to, ключ — ключ канала.
+    func sendComment(_ chatId: String, post: Int64, text: String) async throws {
+        let keys = try await sendKeys(for: chatId)
+        let content = try MessageCrypto.encryptText(keys, text)
+        guard socket.sendMessage(receiver: chatId, content: content, extra: ["comment_to": .number(Double(post))]) else {
+            throw NotConnectedError()
+        }
+    }
+
     /// Поделиться контактом: текст для старых клиентов, карточка — полем c.
     func shareContact(_ chatId: String, contact: ContactRef) async throws {
         let keys = try await sendKeys(for: chatId)

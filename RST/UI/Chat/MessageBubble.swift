@@ -150,6 +150,21 @@ struct MessageRow: View {
                 }
                 content
                 footer.frame(maxWidth: .infinity, alignment: .trailing)
+                if isChannel && !message.isSystem && message.id > 0 {
+                    // Обсуждение поста: комментировать может любой подписчик
+                    Divider().opacity(0.4)
+                    Button { onAction(.comments(message)) } label: {
+                        HStack {
+                            Image(systemName: "bubble.left")
+                            Text(message.commentCount > 0 ? CommentsSheet.countText(message.commentCount) : "Комментировать")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 11))
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(message.isMine ? Color.white : Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)

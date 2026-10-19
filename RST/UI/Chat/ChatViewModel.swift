@@ -7,6 +7,8 @@ import SwiftUI
 final class ChatViewModel {
     let chatId: String
     let isGroup: Bool
+    /// Открытая тема форума: лента и отправка — только её.
+    let topic: ForumTopic?
 
     private(set) var messages: [ChatMessage] = []
     private(set) var hasMore = false
@@ -46,8 +48,9 @@ final class ChatViewModel {
     @ObservationIgnored var visible = false
     @ObservationIgnored private var suppressDraft = false
 
-    init(chatId: String, services: Services) {
+    init(chatId: String, services: Services, topic: ForumTopic? = nil) {
         self.chatId = chatId
+        self.topic = topic
         self.isGroup = MessageRepository.isGroup(chatId)
         self.services = services
         subscription = services.socket.subscribe(owner: self) { [weak self] event in self?.handle(event) }
@@ -72,13 +75,15 @@ final class ChatViewModel {
     var me: String { services.me }
     var summary: ChatSummary? { services.chats.chat(chatId) }
     var isSaved: Bool { chatId == me }
-    var title: String { services.chats.title(for: chatId) }
+    var title: String { topic.map { ($0.icon.isEmpty ? "" : $0.icon + " ") + $0.title } ?? services.chats.title(for: chatId) }
     var myRole: String { summary?.myRole ?? groupInfo?.members?.first { $0.username == me }?.role ?? "member" }
     var canModerate: Bool { ["owner", "admin", "editor", "helper"].contains(myRole) }
     var isChannel: Bool { summary?.isChannel ?? groupInfo?.isChannel ?? false }
 
     var canWrite: Bool {
         if services.chats.blockedUntil != nil { return false }
+        // В закрытую тему пишут только владелец и админы
+        if topic?.closed == true && !["owner", "admin"].contains(myRole) { return false }
         if let summary { return summary.canWrite }
         return true
     }
@@ -92,6 +97,7 @@ final class ChatViewModel {
     }
 
     var subtitle: String {
+        if topic != nil { return services.chats.title(for: chatId) + (topic?.closed == true ? " · тема закрыта" : "") }
         if let typing = services.chats.typingText(chatId, isGroup: isGroup) { return typing }
         if isSaved { return "заметки для себя" }
         if isGroup {
@@ -128,7 +134,7 @@ final class ChatViewModel {
         loading = true
         defer { loading = false }
         do {
-            let history = try await services.messages.history(chatId)
+            let history = try await services.messages.history(chatId, topicId: topic?.id)
             messages = history.messages
             hasMore = history.hasMore
             oldestId = history.oldestId ?? history.messages.first?.id
@@ -153,7 +159,7 @@ final class ChatViewModel {
         loadingOlder = true
         defer { loadingOlder = false }
         do {
-            let page = try await services.messages.history(chatId, beforeId: before)
+            let page = try await services.messages.history(chatId, beforeId: before, topicId: topic?.id)
             let known = Set(messages.map(\.id))
             messages = page.messages.filter { !known.contains($0.id) } + messages
             hasMore = page.hasMore
@@ -190,7 +196,7 @@ final class ChatViewModel {
             await load()
             return
         }
-        guard let fresh = try? await services.messages.since(chatId, afterId: last) else { return }
+        guard let fresh = try? await services.messages.since(chatId, afterId: last, topicId: topic?.id) else { return }
         merge(fresh)
         markVisibleRead()
     }
@@ -238,8 +244,14 @@ final class ChatViewModel {
     private func handle(_ event: WsEvent) {
         switch event {
         case .newMessage(let dto, let receiver):
-            guard dto.commentTo == nil,
-                  services.messages.chatId(sender: dto.sender, receiver: receiver) == chatId else { return }
+            guard services.messages.chatId(sender: dto.sender, receiver: receiver) == chatId else { return }
+            if let post = dto.commentTo {
+                // Комментарий к посту канала: счётчик под постом
+                if let i = messages.firstIndex(where: { $0.id == post }) { messages[i].commentCount += 1 }
+                return
+            }
+            // Тема форума: в ленте только её сообщения (0 — «Общее»)
+            if let topic, (dto.topicId ?? 0) != topic.id { return }
             Task {
                 let message = await services.messages.decryptSingle(dto, chatId: chatId)
                 merge([message])

@@ -64,7 +64,13 @@ struct MainTabView: View {
     @ViewBuilder
     private func destination(_ route: Route) -> some View {
         switch route {
-        case .chat(let id): ChatView(chatId: id)
+        case .chat(let id):
+            // Группа с темами открывается списком тем
+            if store.chat(id)?.isForum == true {
+                TopicsListView(chatId: id)
+            } else {
+                ChatView(chatId: id)
+            }
         case .userProfile(let username): UserProfileView(username: username)
         case .groupInfo(let id): GroupInfoView(chatId: id)
         case .archive: ChatListView(archived: true)

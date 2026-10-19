@@ -386,6 +386,10 @@ final class RstWebSocket {
         return true
     }
 
+    /// Открытая тема форума: сообщения в эту группу уходят с её topic_id,
+    /// как sendWsMessage в вебе по state.currentTopic.
+    var currentTopic: (chat: String, id: Int64)?
+
     /// extra — дополнительные поля кадра (view_once, mention_all, mentions,
     /// reminder, when_online): сервер их проверяет сам.
     func sendMessage(receiver: String, content: String, fileUrl: String? = nil, fileType: String? = nil,
@@ -405,6 +409,9 @@ final class RstWebSocket {
         if let poll { obj["poll"] = .object(poll) }
         if let sendAt { obj["send_at"] = .string(sendAt) }
         for (k, v) in extra { obj[k] = v }
+        if obj["topic_id"] == nil, obj["comment_to"] == nil, let topic = currentTopic, topic.chat == receiver {
+            obj["topic_id"] = .number(Double(topic.id))
+        }
         return sendObject(obj)
     }
 

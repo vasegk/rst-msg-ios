@@ -204,6 +204,13 @@ struct GroupInfoView: View {
                 applySettings { $0.isPublic = v }
             }))
             if info?.isChannel != true {
+                Toggle("Темы", isOn: Binding(get: { store.chat(chatId)?.isForum ?? false }, set: { v in
+                    let number = String(chatId.dropFirst(GroupKeyRepository.prefix.count))
+                    act {
+                        try await services.api.setForum(groupNumber: number, enabled: v)
+                        await store.refresh()
+                    }
+                }))
                 Toggle("Пишут только администраторы", isOn: Binding(get: { info?.adminsOnly ?? false }, set: { v in
                     applySettings { $0.adminsOnly = v }
                 }))

@@ -10,6 +10,7 @@ enum MessageAction {
     case hashtag(String)
     case anyReaction(ChatMessage)
     case stickerSet(String)
+    case comments(ChatMessage)
 }
 
 // MARK: - Любая реакция
