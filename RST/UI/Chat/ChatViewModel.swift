@@ -167,9 +167,17 @@ final class ChatViewModel {
         pinned = (try? await services.messages.pinned(chatId)) ?? pinned
     }
 
+    /// Подписи участников («Модератор») — рядом с именем в ленте группы.
+    private(set) var memberTitles: [String: String] = [:]
+
     func loadGroupInfo() async {
         guard let info = try? await services.api.groupInfo(chatId) else { return }
         groupInfo = info
+        var titles: [String: String] = [:]
+        for m in info.members ?? [] {
+            if let t = m.title, !t.isEmpty { titles[m.username] = t }
+        }
+        memberTitles = titles
         // Раздать ключ тем, у кого его нет (вступили по короткой ссылке или из поиска)
         if let keys = services.keyCache.get(chatId), keys.realGroupKey != nil {
             await services.groupKeys.shareWithNewcomers(groupId: String(chatId.dropFirst(6)), keys: keys, members: info.members ?? [])
@@ -330,6 +338,10 @@ final class ChatViewModel {
 
     private func handleOther(_ action: String, _ payload: JSONValue) {
         switch action {
+        case "member_title":
+            guard payload["group_id"]?.stringValue == chatId, let username = payload["username"]?.stringValue else { return }
+            let title = payload["title"]?.stringValue ?? ""
+            memberTitles[username] = title.isEmpty ? nil : title
         case "view_once_opened":
             // Одноразовое открыли — у обоих файла больше нет
             guard let id = payload["id"]?.int64, let i = messages.firstIndex(where: { $0.id == id }) else { return }

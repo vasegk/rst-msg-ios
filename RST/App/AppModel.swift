@@ -221,6 +221,14 @@ final class AppModel {
                 services.groupKeys.dropPendingKey(groupId)
                 joinNotice = "Заявку в «\(name)» отклонили"
             }
+        case .other(let action, let payload) where action == "join_request" || action == "join_request_resolved":
+            // Админам: новая заявка или её рассмотрел другой админ
+            guard let groupId = payload["group_id"]?.stringValue else { return }
+            NotificationCenter.default.post(name: .rstJoinRequestsChanged, object: groupId)
+            if action == "join_request" {
+                let who = payload["username"]?.stringValue ?? ""
+                joinNotice = "Заявка на вступление в «\(services.chats.title(for: groupId))» от @\(who)"
+            }
         default:
             break
         }

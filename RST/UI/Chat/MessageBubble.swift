@@ -112,6 +112,9 @@ struct MessageRow: View {
                             .foregroundStyle(Theme.avatarGradient(for: store.displayName(message.sender)).0)
                         if store.users[message.sender]?.verified == true { VerifiedBadge(size: 11) }
                         if let emoji = store.emojiStatus(of: message.sender) { Text(emoji).font(.system(size: 12)) }
+                        if let title = model.memberTitles[message.sender] {
+                            Text(title).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
                     }
                 }
                 if let remind = message.remind, message.isReminder || model.isSaved {

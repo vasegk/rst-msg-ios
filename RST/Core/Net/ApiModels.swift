@@ -1060,3 +1060,110 @@ struct StickerAddRequest: Encodable {
         case fileUrl = "file_url"
     }
 }
+
+// MARK: - Управление группой
+
+struct MemberTitleRequest: Encodable {
+    let groupId: String
+    let targetUsername: String
+    let title: String
+    enum CodingKeys: String, CodingKey {
+        case title
+        case groupId = "group_id"
+        case targetUsername = "target_username"
+    }
+}
+
+/// Дополнительная ссылка-приглашение (routers/invites.py, invite_out).
+struct InviteDto: Decodable, Identifiable {
+    let id: Int64
+    let token: String
+    let title: String?
+    let expiresAt: String?
+    let usageLimit: Int?
+    let usageCount: Int?
+    let approval: Bool?
+    /// active / expired / exhausted / revoked
+    let state: String?
+    var isActive: Bool { (state ?? "active") == "active" }
+    enum CodingKeys: String, CodingKey {
+        case id, token, title, approval, state
+        case expiresAt = "expires_at"
+        case usageLimit = "usage_limit"
+        case usageCount = "usage_count"
+    }
+}
+
+struct InvitesResponse: Decodable {
+    let invites: [InviteDto]?
+    let joinApproval: Bool?
+    let requests: Int?
+    enum CodingKeys: String, CodingKey {
+        case invites, requests
+        case joinApproval = "join_approval"
+    }
+}
+
+struct InviteCreateRequest: Encodable {
+    var title: String = ""
+    /// Секунды; 0 — без срока.
+    var expiresIn: Int = 0
+    var usageLimit: Int?
+    var approval: Bool = false
+    enum CodingKeys: String, CodingKey {
+        case title, approval
+        case expiresIn = "expires_in"
+        case usageLimit = "usage_limit"
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encode(expiresIn, forKey: .expiresIn)
+        try c.encode(usageLimit, forKey: .usageLimit)
+        try c.encode(approval, forKey: .approval)
+    }
+}
+
+struct JoinRequestDto: Decodable, Identifiable {
+    let username: String
+    let name: String?
+    let avatarUrl: String?
+    let createdAt: String?
+    /// Название ссылки, по которой подали заявку.
+    let via: String?
+    var id: String { username }
+    enum CodingKeys: String, CodingKey {
+        case username, name, via
+        case avatarUrl = "avatar_url"
+        case createdAt = "created_at"
+    }
+}
+
+struct JoinRequestsResponse: Decodable { let requests: [JoinRequestDto]? }
+
+/// Запись журнала администраторов (routers/admin_log.py).
+struct AdminLogItem: Decodable, Identifiable {
+    let id: Int64
+    let action: String
+    let createdAt: String?
+    let actor: String?
+    let actorName: String?
+    let target: String?
+    let targetName: String?
+    let details: JSONValue?
+    enum CodingKeys: String, CodingKey {
+        case id, action, actor, target, details
+        case createdAt = "created_at"
+        case actorName = "actor_name"
+        case targetName = "target_name"
+    }
+}
+
+struct AdminLogResponse: Decodable {
+    let items: [AdminLogItem]?
+    let hasMore: Bool?
+    enum CodingKeys: String, CodingKey {
+        case items
+        case hasMore = "has_more"
+    }
+}

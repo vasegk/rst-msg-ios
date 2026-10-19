@@ -325,6 +325,33 @@ final class RstApi {
         try await send("POST", "/api/groups/promote", GroupMemberActionRequest(groupId: groupId, targetUsername: username, role: role))
     }
 
+    // MARK: - Управление группой: подписи, ссылки и заявки, журнал
+
+    /// Подпись участника: владелец и админы — любому, участник — себе. Пусто — снять.
+    func setMemberTitle(groupId: String, username: String, title: String) async throws {
+        try await send("POST", "/api/groups/member_title", MemberTitleRequest(groupId: groupId, targetUsername: username, title: title))
+    }
+
+    func invites(groupId: String) async throws -> InvitesResponse { try await get("/api/groups/\(path(groupId))/invites") }
+
+    func createInvite(groupId: String, _ request: InviteCreateRequest) async throws -> InviteDto {
+        try await post("/api/groups/\(path(groupId))/invites", request)
+    }
+
+    func revokeInvite(groupId: String, id: Int64) async throws {
+        try await send("POST", "/api/groups/\(path(groupId))/invites/\(id)/revoke", EmptyBody())
+    }
+
+    func joinRequests(groupId: String) async throws -> JoinRequestsResponse { try await get("/api/groups/\(path(groupId))/requests") }
+
+    func resolveJoinRequest(groupId: String, username: String, approve: Bool) async throws {
+        try await send("POST", "/api/groups/\(path(groupId))/requests/\(path(username))/\(approve ? "approve" : "decline")", EmptyBody())
+    }
+
+    func adminLog(groupId: String, before: Int64?) async throws -> AdminLogResponse {
+        try await get("/api/groups/\(path(groupId))/admin_log" + (before.map { "?before=\($0)" } ?? ""))
+    }
+
     // MARK: - Стикеры (routers/stickers.py)
 
     /// Добавленные себе наборы (свои — тоже).

@@ -124,4 +124,28 @@ final class ApiContractTests: XCTestCase {
         let body = try JSONCoding.encodeData(StickerAddRequest(fileUrl: "/uploads/a.png", emoji: "🙂"))
         XCTAssertTrue(String(decoding: body, as: UTF8.self).contains(#""file_url":"/uploads/a.png""#))
     }
+
+    /// Журнал администраторов (describeAction в js/admin-log.js) и ссылки-приглашения.
+    func testAdminLogAndInvites() throws {
+        let raw = #"{"items":[{"id":5,"action":"slow_mode_changed","created_at":"2026-10-19T10:00:00","actor":"ivan","actor_name":"Иван","target":null,"target_name":null,"details":{"seconds":300}},{"id":4,"action":"title_changed","actor":"ivan","actor_name":"Иван","target":"bob","target_name":"Боб","details":{"title":"Модератор"}},{"id":3,"action":"brand_new","actor":"ivan","details":{}}],"has_more":true}"#
+        let page = try JSONDecoder().decode(AdminLogResponse.self, from: Data(raw.utf8))
+        XCTAssertEqual(page.hasMore, true)
+        let items = try XCTUnwrap(page.items)
+        XCTAssertEqual(AdminLogText.describe(items[0]).map(\.text).joined(), "Иван включил(а) медленный режим: раз в 5 мин")
+        XCTAssertEqual(AdminLogText.describe(items[1]).map(\.text).joined(), "Иван подписал(а) Боб: «Модератор»")
+        XCTAssertEqual(AdminLogText.describe(items[1]).first?.bold, true)
+        XCTAssertEqual(AdminLogText.describe(items[2]).map(\.text).joined(), "ivan: brand_new")
+
+        var request = InviteCreateRequest()
+        request.title = "Для друзей"
+        request.approval = true
+        let body = String(decoding: try JSONCoding.encodeData(request), as: UTF8.self)
+        XCTAssertTrue(body.contains(#""usage_limit":null"#))
+        XCTAssertTrue(body.contains(#""expires_in":0"#))
+
+        let invites = #"{"invites":[{"id":1,"token":"abc","title":"","created_by":"ivan","created_at":"2026-10-19T10:00:00","expires_at":null,"usage_limit":10,"usage_count":2,"approval":false,"state":"exhausted"}],"join_approval":true,"requests":3}"#
+        let list = try JSONDecoder().decode(InvitesResponse.self, from: Data(invites.utf8))
+        XCTAssertEqual(list.requests, 3)
+        XCTAssertEqual(list.invites?.first?.isActive, false)
+    }
 }

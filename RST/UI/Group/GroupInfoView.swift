@@ -17,6 +17,10 @@ struct GroupInfoView: View {
     @State private var editing = false
     @State private var avatarItem: PhotosPickerItem?
     @State private var busy = false
+    @State private var alias = ""
+    /// Чью подпись правим (окно с полем).
+    @State private var titleFor: GroupMemberDto?
+    @State private var titleText = ""
 
     private var me: String { store.me }
     private var myRole: String { info?.members?.first { $0.username == me }?.role ?? store.chat(chatId)?.myRole ?? "member" }
@@ -146,6 +150,34 @@ struct GroupInfoView: View {
         .confirmationDialog("Удалить группу для всех?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) { deleteGroup() }
         }
+        .alert("Подпись в группе", isPresented: Binding(get: { titleFor != nil }, set: { if !$0 { titleFor = nil } })) {
+            TextField("Например, «Модератор»", text: $titleText)
+            Button("Сохранить") { saveTitle() }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Видна всем рядом с именем в ленте группы. Пустое поле убирает подпись.")
+        }
+        .onChange(of: info?.alias) { _, value in alias = value ?? "" }
+    }
+
+    private func saveTitle() {
+        guard let member = titleFor else { return }
+        let value = String(titleText.trimmingCharacters(in: .whitespaces).filter { $0 != "<" && $0 != ">" }.prefix(32))
+        act { try await services.api.setMemberTitle(groupId: chatId, username: member.username, title: value) }
+    }
+
+    private func saveAlias() {
+        var value = alias.trimmingCharacters(in: .whitespaces)
+        // Вставили ссылку целиком — берём последнюю часть
+        if let slash = value.lastIndex(of: "/") { value = String(value[value.index(after: slash)...]) }
+        value = value.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        alias = value
+        guard value.isEmpty || value.range(of: "^[A-Za-z0-9_-]{1,32}$", options: .regularExpression) != nil else {
+            error = "В ссылке можно использовать только латинские буквы, цифры, дефис и подчёркивание"
+            return
+        }
+        // Пустая строка (не null) — сервер убирает ссылку
+        applySettings { $0.alias = value }
     }
 
     private var countLine: String {
@@ -187,7 +219,40 @@ struct GroupInfoView: View {
                     Text("1 час").tag(3600)
                 }
             }
+            Toggle("Запрет пересылки и сохранения", isOn: Binding(get: { info?.isProtected ?? false }, set: { v in
+                applySettings { $0.isProtected = v }
+            }))
+            Toggle("Заявки на вступление", isOn: Binding(get: { info?.joinApproval ?? false }, set: { v in
+                applySettings { $0.joinApproval = v }
+            }))
+            NavigationLink { InvitesView(chatId: chatId, keys: keys) } label: {
+                HStack {
+                    Text("Ссылки и заявки")
+                    Spacer()
+                    if let n = info?.joinRequests, n > 0 {
+                        Text("\(n)").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.accent))
+                    }
+                }
+            }
             Button("Новая ссылка-приглашение") { applySettings { $0.regenerateInvite = true } }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Text((services.api.baseURL.host ?? "") + "/").foregroundStyle(Theme.muted)
+                    TextField("mygroup", text: $alias)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Сохранить") { saveAlias() }
+                        .disabled(alias == (info?.alias ?? ""))
+                }
+                Text("Короткая ссылка: латиница, цифры, дефис и подчёркивание, до 32 знаков. Пустое поле убирает ссылку.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+            }
+        }
+        Section {
+            NavigationLink { GroupBansView(chatId: chatId) } label: { Label("Заблокированные", systemImage: "nosign") }
+            NavigationLink { AdminLogView(chatId: chatId) } label: { Label("Недавние действия", systemImage: "clock.arrow.circlepath") }
         }
     }
 
@@ -213,6 +278,13 @@ struct GroupInfoView: View {
             }
         }
         .contextMenu {
+            // Подпись: владелец и админы — любому, участник — себе
+            if isAdmin || member.username == me {
+                Button {
+                    titleText = member.title ?? ""
+                    titleFor = member
+                } label: { Label("Подпись", systemImage: "tag") }
+            }
             if isAdmin && member.username != me && member.role != "owner" && (isOwner || member.role != "admin") {
                 Menu {
                     ForEach(["admin", "editor", "helper", "member"], id: \.self) { role in
