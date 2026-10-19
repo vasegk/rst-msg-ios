@@ -202,6 +202,22 @@ final class AppModel {
             services.socket.reconnect()
         case .connection(let connected, _):
             if connected { services.messages.flushOutbox() }
+        case .groupAdded(let groupId):
+            // Заявку одобрили (или добавили) — ключ из ссылки, если ждал
+            Task { await services.groupKeys.applyPendingKey(chatId: groupId) }
+        case .other(let action, let payload) where action == "join_request_done":
+            guard let groupId = payload["group_id"]?.stringValue else { return }
+            let name = payload["name"]?.stringValue ?? "группу"
+            if payload["approved"]?.bool == true {
+                Task {
+                    await services.groupKeys.applyPendingKey(chatId: groupId)
+                    await services.chats.refresh()
+                }
+                joinNotice = "Заявку в «\(name)» одобрили"
+            } else {
+                services.groupKeys.dropPendingKey(groupId)
+                joinNotice = "Заявку в «\(name)» отклонили"
+            }
         default:
             break
         }
@@ -213,7 +229,7 @@ final class AppModel {
     func open(url: URL) {
         let raw = url.absoluteString
         if let invite = InviteLink.parse(raw) {
-            Task { await joinByInvite(invite) }
+            Task { await previewInvite(invite) }
             return
         }
         let path = url.path
@@ -223,14 +239,57 @@ final class AppModel {
     }
 
     var joinError: String?
+    /// Короткое сообщение о заявке (отправлена, одобрена, отклонена).
+    var joinNotice: String?
 
-    private func joinByInvite(_ invite: InviteLink) async {
+    /// Окно «Вступить?» перед входом по ссылке (с 2026-10-12).
+    struct JoinOffer: Identifiable {
+        let invite: InviteLink
+        let preview: JoinPreviewResponse
+        var id: String { invite.inviteHash }
+    }
+
+    var joinOffer: JoinOffer?
+
+    /// Сначала предпросмотр — он ничего не меняет; вступление — только по нажатию.
+    private func previewInvite(_ invite: InviteLink) async {
         do {
-            let chatId = try await services.groupKeys.join(invite: invite)
-            await services.chats.refresh()
-            pendingChat = chatId
+            let preview = try await services.api.joinPreview(invite.inviteHash)
+            let chatId = preview.groupId.map { $0.hasPrefix("group_") ? $0 : "group_" + $0 }
+            if preview.isMember == true, let chatId {
+                pendingChat = chatId
+            } else if preview.requested == true {
+                if let chatId, let key = invite.groupKeyB64 { services.groupKeys.savePendingKey(chatId, key) }
+                joinNotice = "Заявка уже отправлена — её рассмотрят администраторы"
+            } else {
+                joinOffer = JoinOffer(invite: invite, preview: preview)
+            }
+        } catch let error as ApiError {
+            switch error.code {
+            case 404: joinError = "Ссылка недействительна или отозвана"
+            case 410: joinError = "Срок ссылки истёк или её предел исчерпан"
+            case 403: joinError = "Вы исключены из этой группы"
+            default: joinError = error.localizedDescription
+            }
         } catch {
             joinError = error.localizedDescription
+        }
+    }
+
+    func confirmJoin(_ offer: JoinOffer) {
+        joinOffer = nil
+        Task {
+            do {
+                let result = try await services.groupKeys.join(invite: offer.invite)
+                if result.requested {
+                    joinNotice = "Заявка отправлена — её рассмотрят администраторы"
+                } else {
+                    await services.chats.refresh()
+                    pendingChat = result.chatId
+                }
+            } catch {
+                joinError = errorText(error)
+            }
         }
     }
 }

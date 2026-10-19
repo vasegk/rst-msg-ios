@@ -194,10 +194,11 @@ final class ChatListStore {
                 let text = await messages.previewText(chatId: chatId, content: dto.content, fileType: dto.fileType)
                 previews[chatId] = text
             }
-        case .messageRead(let id, let receiver, _):
-            // Прочитали моё последнее — галочки в строке
+        case .messageRead(let id, let upTo, let receiver, _):
+            // Прочитали моё последнее — галочки в строке (up_to: всё своё до него)
+            let limit = max(id, upTo)
             for index in chats.indices where chats[index].lastMsg?.id == id || chats[index].chatId == receiver {
-                if let last = chats[index].lastMsg, last.sender == me, (last.id ?? 0) <= id {
+                if let last = chats[index].lastMsg, last.sender == me, (last.id ?? 0) <= limit {
                     chats[index].lastMsg = LastMessageDto(id: last.id, sender: last.sender, content: last.content,
                                                           fileType: last.fileType, time: last.time, status: "read")
                 }
@@ -211,8 +212,10 @@ final class ChatListStore {
             }
         case .chatRead(let chat, let unread):
             update(chat) { $0.unread = unread }
-        case .messageDeleted(let id, _):
-            if chats.contains(where: { $0.lastMsg?.id == id }) { scheduleRefresh() }
+        case .messageDeleted:
+            // Превью и счётчик могли измениться — перечитать список (серия
+            // удалений схлопывается в один запрос)
+            scheduleRefresh()
         case .messageEdited(let id, let content, let receiver):
             let target = receiver.hasPrefix("group_") ? receiver : chats.first(where: { $0.lastMsg?.id == id })?.chatId
             guard let chatId = target, let chat = chat(chatId), chat.lastMsg?.id == id, let last = chat.lastMsg else { return }
@@ -243,6 +246,9 @@ final class ChatListStore {
         case .chatCleared(let target):
             update(target) { $0.lastMsg = nil }
             previews[target] = nil
+            scheduleRefresh()
+        case .other(let action, let payload):
+            handleOther(action, payload)
         case .groupAdded, .groupRemoved, .groupRenamed, .groupSettingsChanged, .contactRenamed, .chatTimer:
             scheduleRefresh()
         case .blocked(let until):
@@ -254,6 +260,46 @@ final class ChatListStore {
         default:
             break
         }
+    }
+
+    private func handleOther(_ action: String, _ payload: JSONValue) {
+        switch action {
+        case "reactions_unread_changed":
+            // Кто-то поставил или снял реакцию на моё — «❤» в строке
+            if payload["chat"]?.stringValue != activeChatId { scheduleRefresh() }
+        case "emoji_status":
+            guard let username = payload["username"]?.stringValue else { return }
+            let emoji = payload["emoji_status"]?.stringValue ?? ""
+            let until = ServerTime.parse(payload["emoji_status_until"]?.stringValue)
+            update(username) {
+                $0.emojiStatus = emoji.isEmpty ? nil : emoji
+                $0.emojiStatusUntil = until
+            }
+            emojiStatuses[username] = emoji.isEmpty ? nil : EmojiStatus(emoji: emoji, until: until)
+        case "join_request_done", "view_once_opened":
+            scheduleRefresh()
+        default:
+            break
+        }
+    }
+
+    struct EmojiStatus: Equatable {
+        let emoji: String
+        let until: Date?
+    }
+
+    /// Эмодзи-статусы людей вне списка чатов (участники групп), по событиям.
+    private(set) var emojiStatuses: [String: EmojiStatus] = [:]
+
+    /// Эмодзи-статус человека для показа после имени, если не истёк.
+    func emojiStatus(of username: String) -> String? {
+        if let s = chat(username)?.activeEmojiStatus { return s }
+        if let s = emojiStatuses[username], s.until.map({ $0 > Date() }) ?? true { return s.emoji }
+        if let u = users[username], let e = u.emojiStatus, !e.isEmpty {
+            if let until = ServerTime.parse(u.emojiStatusUntil), until <= Date() { return nil }
+            return e
+        }
+        return nil
     }
 
     private func setTyping(_ chatId: String, _ user: String) {

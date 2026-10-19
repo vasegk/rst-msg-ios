@@ -51,14 +51,44 @@ private struct ChatContent: View {
     @State private var linkToConfirm: String?
     @State private var pinnedIndex = 0
     @State private var nearBottom = true
+    @State private var editsOf: ChatMessage?
+    @State private var viewOnceImage: UIImage?
+    @State private var viewOnceVideo: URL?
+    @Environment(AppModel.self) private var app
+    /// Идёт запись или трансляция экрана — защищённый чат прячется.
+    @State private var screenCaptured = UIScreen.main.isCaptured
 
     var body: some View {
         VStack(spacing: 0) {
             ConnectionBanner()
             banners
             if !model.pinned.isEmpty { pinnedBar }
-            messagesList
+            if model.isProtected && screenCaptured {
+                // Запрет сохранения: при записи экрана переписку не показываем
+                VStack(spacing: 10) {
+                    Image(systemName: "eye.slash").font(.system(size: 34))
+                    Text("В этой группе запрещено сохранять сообщения — во время записи экрана переписка скрыта.")
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundStyle(Theme.muted)
+                .padding(30)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                messagesList
+            }
             ComposerView(model: model)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            screenCaptured = UIScreen.main.isCaptured
+        }
+        .sheet(item: $editsOf) { message in
+            EditHistorySheet(message: message).presentationDetents([.medium, .large])
+        }
+        .fullScreenCover(isPresented: Binding(get: { viewOnceImage != nil }, set: { if !$0 { viewOnceImage = nil } })) {
+            if let viewOnceImage { ViewOnceImageViewer(image: viewOnceImage) }
+        }
+        .fullScreenCover(isPresented: Binding(get: { viewOnceVideo != nil }, set: { if !$0 { closeViewOnceVideo() } })) {
+            if let viewOnceVideo { VideoPlayerScreen(url: viewOnceVideo) }
         }
         .background(AppBackground())
         .navigationBarTitleDisplayMode(.inline)
@@ -116,6 +146,40 @@ private struct ChatContent: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Другой чат (напоминание, карточка контакта); тот же — к сообщению.
+    private func openChat(_ chat: String, _ messageId: Int64) {
+        if chat == model.chatId {
+            if messageId > 0 { model.jump(to: messageId) }
+            return
+        }
+        if chat.hasPrefix("group_") && store.chat(chat) == nil {
+            model.toast = "Этого чата больше нет в списке"
+            return
+        }
+        app.pendingChat = chat
+    }
+
+    /// Одноразовое: в память, без кэша и без «Сохранить»; видео — во временный
+    /// файл только на время просмотра.
+    private func openViewOnce(_ message: ChatMessage) {
+        let isVideo = message.attachment?.isVideo ?? false
+        Task {
+            guard let data = await model.openViewOnce(message) else { return }
+            if isVideo {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("vo-\(UUID().uuidString).mp4")
+                guard (try? data.write(to: url, options: [.completeFileProtection])) != nil else { return }
+                viewOnceVideo = url
+            } else if let image = UIImage(data: data) {
+                viewOnceImage = image
+            }
+        }
+    }
+
+    private func closeViewOnceVideo() {
+        if let url = viewOnceVideo { try? FileManager.default.removeItem(at: url) }
+        viewOnceVideo = nil
     }
 
     private var subtitleHighlighted: Bool {
@@ -204,32 +268,57 @@ private struct ChatContent: View {
     private enum Item: Identifiable {
         case day(Date)
         case message(ChatMessage, showSender: Bool, showAvatar: Bool)
+        /// Альбом: подряд идущие вложения одного автора с общим a (до 10).
+        case album([ChatMessage], showSender: Bool, showAvatar: Bool)
 
         var id: String {
             switch self {
             case .day(let d): return "day-\(Int(d.timeIntervalSince1970))"
             case .message(let m, _, _): return "m\(m.id)"
+            // Прокрутка к сообщению альбома ищет id его первого вложения
+            case .album(let list, _, _): return "m\(list.first?.id ?? 0)"
             }
         }
     }
 
+    /// Сообщения, собранные в альбомы: подряд, один автор, одинаковый a, не больше 10.
+    private func groupAlbums(_ all: [ChatMessage]) -> [[ChatMessage]] {
+        var groups: [[ChatMessage]] = []
+        for m in all {
+            if let album = m.album, m.attachment != nil, !m.viewOnce, !m.isSystem,
+               var last = groups.last, last.count < 10, let head = last.first,
+               head.album == album, head.sender == m.sender {
+                last.append(m)
+                groups[groups.count - 1] = last
+            } else {
+                groups.append([m])
+            }
+        }
+        return groups
+    }
+
     private var items: [Item] {
-        let all = model.messages + model.pendingMessages
+        let groups = groupAlbums(model.messages + model.pendingMessages)
         var out: [Item] = []
         let cal = Calendar.current
         var lastDay: Date?
-        for (i, m) in all.enumerated() {
+        for (i, group) in groups.enumerated() {
+            guard let m = group.first else { continue }
             let date = m.createdAt ?? Date()
             let day = cal.startOfDay(for: date)
             if lastDay != day {
                 out.append(.day(day))
                 lastDay = day
             }
-            let prev = i > 0 ? all[i - 1] : nil
-            let next = i + 1 < all.count ? all[i + 1] : nil
+            let prev = i > 0 ? groups[i - 1].last : nil
+            let next = i + 1 < groups.count ? groups[i + 1].first : nil
             let sameAsPrev = prev.map { $0.sender == m.sender && !$0.isSystem && cal.isDate($0.createdAt ?? date, inSameDayAs: date) } ?? false
             let sameAsNext = next.map { $0.sender == m.sender && !$0.isSystem } ?? false
-            out.append(.message(m, showSender: !sameAsPrev, showAvatar: !sameAsNext))
+            if group.count > 1 {
+                out.append(.album(group, showSender: !sameAsPrev, showAvatar: !sameAsNext))
+            } else {
+                out.append(.message(m, showSender: !sameAsPrev, showAvatar: !sameAsNext))
+            }
         }
         return out
     }
@@ -268,9 +357,17 @@ private struct ChatContent: View {
                                        onForward: { forwarding = $0 },
                                        onReactionsList: { reactionsOf = $0 },
                                        onOpenProfile: { name in if name != store.me { profileTarget = name } },
-                                       onConfirmLink: { linkToConfirm = $0 })
+                                       onConfirmLink: { linkToConfirm = $0 },
+                                       onOpenChat: { chat, messageId in openChat(chat, messageId) },
+                                       onShowEdits: { editsOf = $0 },
+                                       onOpenViewOnce: { openViewOnce($0) })
                                 .id(item.id)
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        case .album(let list, let showSender, let showAvatar):
+                            AlbumRow(messages: list, isGroup: model.isGroup, isChannel: model.isChannel,
+                                     showSender: showSender, showAvatar: showAvatar, model: model,
+                                     onOpenImage: { viewerImage = $0 }, onForward: { forwarding = $0 })
+                                .id(item.id)
                         }
                     }
                     Color.clear.frame(height: 6).id("bottom")
@@ -351,6 +448,75 @@ private struct ChatContent: View {
                 }
                 .onTapGesture { model.toast = nil }
         }
+    }
+}
+
+// MARK: - Одноразовые и защита от снимков экрана
+
+/// Одноразовое фото: без «Сохранить» и «Поделиться», на снимке экрана — пусто.
+struct ViewOnceImageViewer: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            ScreenshotProtected {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .ignoresSafeArea()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
+            }
+            .padding()
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// Содержимое внутри слоя защищённого поля ввода (isSecureTextEntry): на снимке
+/// и записи экрана он пустой. Аналог FLAG_SECURE на Android. Снимок другим
+/// устройством это не остановит.
+struct ScreenshotProtected<Content: View>: UIViewRepresentable {
+    @ViewBuilder var content: () -> Content
+
+    func makeUIView(context: Context) -> UIView {
+        let host = UIHostingController(rootView: content())
+        host.view.backgroundColor = .clear
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        context.coordinator.host = host
+
+        let field = UITextField()
+        field.isSecureTextEntry = true
+        // Защищённый слой — первый вложенный вид поля; его и берём контейнером
+        guard let secure = field.subviews.first else { return host.view }
+        secure.subviews.forEach { $0.removeFromSuperview() }
+        secure.isUserInteractionEnabled = true
+        secure.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.leadingAnchor.constraint(equalTo: secure.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: secure.trailingAnchor),
+            host.view.topAnchor.constraint(equalTo: secure.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: secure.bottomAnchor),
+        ])
+        return secure
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.host?.rootView = content()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var host: UIHostingController<Content>?
     }
 }
 

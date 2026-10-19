@@ -274,17 +274,80 @@ final class GroupKeyRepository {
 
     /// Вступление по ссылке: ключ приходит во фрагменте адреса, поэтому после
     /// вступления его нужно упаковать для себя и сохранить на сервере.
-    func join(invite: InviteLink) async throws -> String {
-        let resolved = try await api.resolveInvite(invite.inviteHash).groupId
+    struct JoinResult {
+        let chatId: String
+        /// Заявка отправлена — участником ещё не стал, ключ ждёт одобрения.
+        let requested: Bool
+        let name: String?
+    }
+
+    func join(invite: InviteLink) async throws -> JoinResult {
+        let response = try await api.resolveInvite(invite.inviteHash)
+        let resolved = response.groupId
         let groupId = resolved.hasPrefix(Self.prefix) ? String(resolved.dropFirst(Self.prefix.count)) : resolved
         let chatId = Self.prefix + groupId
-        guard let keyB64 = invite.groupKeyB64, let raw = Data(base64Encoded: keyB64) else { return chatId }
+        if response.isRequested {
+            // До одобрения сервер ключ не примет — держим у себя
+            if let key = invite.groupKeyB64 { savePendingKey(chatId, key) }
+            return JoinResult(chatId: chatId, requested: true, name: response.name)
+        }
+        guard let keyB64 = invite.groupKeyB64 else { return JoinResult(chatId: chatId, requested: false, name: response.name) }
+        try await storeOwnKey(chatId: chatId, keyB64: keyB64)
+        return JoinResult(chatId: chatId, requested: false, name: response.name)
+    }
+
+    /// Ключ из ссылки — упаковать себе (ECDH со своим же открытым) и сохранить на сервере.
+    private func storeOwnKey(chatId: String, keyB64: String) async throws {
+        guard let raw = Data(base64Encoded: keyB64), raw.count == 32 else { return }
         let me = try userKeys.myUsername
         let priv = try userKeys.myPrivateKey()
         let packet = try GroupKeyCrypto.wrap(SymmetricKey(data: raw), myUsername: me, myPrivateKey: priv, memberPublicKey: priv.publicKey)
         try await api.setMyGroupKey(groupId: chatId, encryptedKey: packet.json)
         remember(me, chatId)
-        return chatId
+    }
+
+    // MARK: Ключи, ждущие одобрения заявки (в связке ключей: это ключи групп)
+
+    private func pendingAccount(_ me: String) -> String { "pending_group_keys.\(me)" }
+
+    private func pendingKeys() -> [String: String] {
+        guard let me = try? userKeys.myUsername, let data = Keychain.read(pendingAccount(me)),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return dict
+    }
+
+    private func setPendingKeys(_ dict: [String: String]) {
+        guard let me = try? userKeys.myUsername else { return }
+        if dict.isEmpty {
+            Keychain.delete(pendingAccount(me))
+        } else if let data = try? JSONEncoder().encode(dict) {
+            Keychain.write(pendingAccount(me), data)
+        }
+    }
+
+    func savePendingKey(_ chatId: String, _ keyB64: String) {
+        var dict = pendingKeys()
+        dict[chatId] = keyB64
+        setPendingKeys(dict)
+    }
+
+    /// Заявку одобрили — сразу сохранить ключ, полученный в ссылке.
+    func applyPendingKey(chatId: String) async {
+        var dict = pendingKeys()
+        guard let keyB64 = dict[chatId] else { return }
+        do {
+            try await storeOwnKey(chatId: chatId, keyB64: keyB64)
+            dict[chatId] = nil
+            setPendingKeys(dict)
+        } catch {
+            // Не вышло (ещё не участник) — попробуем при следующем group_added
+        }
+    }
+
+    func dropPendingKey(_ chatId: String) {
+        var dict = pendingKeys()
+        dict[chatId] = nil
+        setPendingKeys(dict)
     }
 
     /// Публичная группа из поиска: ключ передаст кто-то из участников.

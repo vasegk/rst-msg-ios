@@ -48,6 +48,17 @@ enum JSONValue: Codable, Equatable {
         }
     }
 
+    /// Только настоящая строка — без приведения чисел и логических значений.
+    var stringValue: String? {
+        if case .string(let s) = self { return s }
+        return nil
+    }
+
+    var double: Double? {
+        if case .number(let n) = self { return n }
+        return nil
+    }
+
     var int64: Int64? {
         switch self {
         case .number(let n): return Int64(n)

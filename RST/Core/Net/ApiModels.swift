@@ -269,6 +269,10 @@ struct ContactUserDto: Decodable, Equatable {
     let musicTitle: String?
     let autoreplyOn: Bool?
     let autoreplyText: String?
+    /// Сообщений с новыми реакциями на мои (с 2026-10-08).
+    let unreadReactions: Int?
+    let emojiStatus: String?
+    let emojiStatusUntil: String?
 
     var isDeleted: Bool { status == "deleted" }
     var displayName: String { (name?.isEmpty == false ? name : nil) ?? username }
@@ -298,6 +302,9 @@ struct ContactUserDto: Decodable, Equatable {
         case musicTitle = "music_title"
         case autoreplyOn = "autoreply_on"
         case autoreplyText = "autoreply_text"
+        case unreadReactions = "unread_reactions"
+        case emojiStatus = "emoji_status"
+        case emojiStatusUntil = "emoji_status_until"
     }
 }
 
@@ -334,8 +341,13 @@ struct ContactGroupDto: Decodable, Equatable {
     /// "group" или "channel"
     let kind: String?
     let forum: Bool?
+    let unreadReactions: Int?
+    /// Запрет пересылки и сохранения (с 2026-10-18).
+    let isProtected: Bool?
     enum CodingKeys: String, CodingKey {
         case id, name, unread, muted, pinned, archived, kind, forum
+        case unreadReactions = "unread_reactions"
+        case isProtected = "protected"
         case avatarUrl = "avatar_url"
         case lastMsg = "last_msg"
         case adminsOnly = "admins_only"
@@ -524,6 +536,13 @@ struct MessageDto: Decodable, Equatable {
     let topicId: Int64?
     let commentTo: Int64?
     let commentCount: Int?
+    /// Одноразовое фото/видео (с 2026-10-08).
+    let viewOnce: Bool?
+    /// Напоминание в Избранное (с 2026-10-18).
+    let reminder: Bool?
+    /// Уже очищенные сервером упоминания (с 2026-10-18).
+    let mentionAll: Bool?
+    let mentions: [String]?
 
     static let fileTypeSystem = "system"
     static let fileTypePoll = "application/x-rst-poll"
@@ -548,6 +567,10 @@ struct MessageDto: Decodable, Equatable {
         case topicId = "topic_id"
         case commentTo = "comment_to"
         case commentCount = "comment_count"
+        case viewOnce = "view_once"
+        case reminder
+        case mentionAll = "mention_all"
+        case mentions
     }
 
     init(from decoder: Decoder) throws {
@@ -581,6 +604,10 @@ struct MessageDto: Decodable, Equatable {
         topicId = try c.decodeFlexibleInt64(.topicId)
         commentTo = try c.decodeFlexibleInt64(.commentTo)
         commentCount = try? c.decodeIfPresent(Int.self, forKey: .commentCount)
+        viewOnce = try? c.decodeIfPresent(Bool.self, forKey: .viewOnce)
+        reminder = try? c.decodeIfPresent(Bool.self, forKey: .reminder)
+        mentionAll = try? c.decodeIfPresent(Bool.self, forKey: .mentionAll)
+        mentions = try? c.decodeIfPresent([String].self, forKey: .mentions)
     }
 }
 
@@ -765,11 +792,15 @@ struct GroupSettingsRequest: Encodable {
     var adminsOnly: Bool?
     /// Секунды из набора 0, 10, 30, 60, 300, 900, 3600.
     var slowMode: Int?
+    var isProtected: Bool?
+    var joinApproval: Bool?
 
     init(groupId: String) { self.groupId = groupId }
 
     enum CodingKeys: String, CodingKey {
         case alias, description
+        case isProtected = "protected"
+        case joinApproval = "join_approval"
         case groupId = "group_id"
         case isPublic = "is_public"
         case regenerateInvite = "regenerate_invite"
@@ -783,9 +814,16 @@ struct JoinPublicRequest: Encodable {
     enum CodingKeys: String, CodingKey { case groupId = "group_id" }
 }
 
+/// Вступление по ссылке: status — ok / already_member / requested (заявка
+/// отправлена, участником ещё не стал).
 struct JoinByHashResponse: Decodable {
     let groupId: String
-    enum CodingKeys: String, CodingKey { case groupId = "group_id" }
+    let status: String?
+    let name: String?
+    enum CodingKeys: String, CodingKey {
+        case status, name
+        case groupId = "group_id"
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let s = try? c.decode(String.self, forKey: .groupId) {
@@ -793,7 +831,67 @@ struct JoinByHashResponse: Decodable {
         } else {
             groupId = String(try c.decode(Int64.self, forKey: .groupId))
         }
+        status = try? c.decodeIfPresent(String.self, forKey: .status)
+        name = try? c.decodeIfPresent(String.self, forKey: .name)
     }
+    var isRequested: Bool { status == "requested" }
+}
+
+/// Предпросмотр группы по ссылке — ничего не меняет (с 2026-10-12).
+struct JoinPreviewResponse: Decodable {
+    let groupId: String?
+    let name: String?
+    let description: String?
+    let avatarUrl: String?
+    let kind: String?
+    let members: Int?
+    let approval: Bool?
+    let isMember: Bool?
+    let requested: Bool?
+    var isChannel: Bool { kind == "channel" }
+    enum CodingKeys: String, CodingKey {
+        case name, description, kind, members, approval, requested
+        case groupId = "group_id"
+        case avatarUrl = "avatar_url"
+        case isMember = "is_member"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let s = try? c.decodeIfPresent(String.self, forKey: .groupId) {
+            groupId = s
+        } else if let n = try? c.decodeIfPresent(Int64.self, forKey: .groupId) {
+            groupId = String(n)
+        } else {
+            groupId = nil
+        }
+        name = try? c.decodeIfPresent(String.self, forKey: .name)
+        description = try? c.decodeIfPresent(String.self, forKey: .description)
+        avatarUrl = try? c.decodeIfPresent(String.self, forKey: .avatarUrl)
+        kind = try? c.decodeIfPresent(String.self, forKey: .kind)
+        members = try? c.decodeIfPresent(Int.self, forKey: .members)
+        approval = try? c.decodeIfPresent(Bool.self, forKey: .approval)
+        isMember = try? c.decodeIfPresent(Bool.self, forKey: .isMember)
+        requested = try? c.decodeIfPresent(Bool.self, forKey: .requested)
+    }
+}
+
+/// Новые реакции на мои сообщения, по порядку (с 2026-10-08).
+struct ReactionsUnreadResponse: Decodable {
+    struct Item: Decodable, Equatable {
+        let messageId: Int64
+        let reactor: String?
+        let emoji: String?
+        enum CodingKeys: String, CodingKey {
+            case reactor, emoji
+            case messageId = "message_id"
+        }
+    }
+    let items: [Item]?
+}
+
+struct ReactionsSeenRequest: Encodable {
+    let chat: String
+    let ids: [Int64]
 }
 
 struct PublicGroupDto: Decodable, Identifiable {
@@ -819,10 +917,12 @@ struct GroupMemberDto: Decodable, Identifiable, Equatable {
     let hasKey: Bool?
     let verified: Bool?
     let title: String?
+    let emojiStatus: String?
     var id: String { username }
     var shownName: String { (displayName?.isEmpty == false ? displayName : nil) ?? username }
     enum CodingKeys: String, CodingKey {
         case username, role, status, verified, title
+        case emojiStatus = "emoji_status"
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
         case hasKey = "has_key"
@@ -842,9 +942,15 @@ struct GroupInfoResponse: Decodable {
     let slowMode: Int?
     let kind: String?
     let subscribers: Int?
+    let isProtected: Bool?
+    let joinApproval: Bool?
+    let joinRequests: Int?
     var isChannel: Bool { kind == "channel" }
     enum CodingKeys: String, CodingKey {
         case name, description, members, alias, kind, subscribers
+        case isProtected = "protected"
+        case joinApproval = "join_approval"
+        case joinRequests = "join_requests"
         case groupId = "group_id"
         case avatarUrl = "avatar_url"
         case isPublic = "is_public"

@@ -1,5 +1,38 @@
 import Foundation
 
+/// Упоминания в тексте: @ник латиницей, @все/@all — всем, @онлайн/@online — тем,
+/// кто смотрит на экран (решает получатель). Веб: mentions.js, text-format.js.
+enum Mentions {
+    private static let nameRE = try! NSRegularExpression(pattern: #"(?:^|\s)@([A-Za-z0-9_-]{1,32})(?![\p{L}\p{N}_-])"#)
+    private static let allRE = try! NSRegularExpression(pattern: #"(?:^|\s)@(все|all)(?![\p{L}\p{N}_-])"#, options: .caseInsensitive)
+    private static let everyoneRE = try! NSRegularExpression(
+        pattern: #"(?:^|\s)@(все|all|онлайн|online)(?![\p{L}\p{N}_-])"#, options: .caseInsensitive)
+    static let special: Set<String> = ["all", "online", "все", "онлайн"]
+
+    /// Подсказка серверу: mention_all и ники (по разу, без all/online, до 50).
+    static func hints(in text: String) -> (all: Bool, names: [String]) {
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let all = allRE.firstMatch(in: text, range: range) != nil
+        var names: [String] = []
+        for m in nameRE.matches(in: text, range: range) {
+            let name = ns.substring(with: m.range(at: 1))
+            guard !special.contains(name.lowercased()), !names.contains(name) else { continue }
+            names.append(name)
+            if names.count == 50 { break }
+        }
+        return (all, names)
+    }
+
+    /// Упомянут ли человек: @ник (без учёта регистра) или @все/@онлайн.
+    static func mentions(_ username: String, in text: String) -> Bool {
+        guard text.contains("@"), !username.isEmpty else { return false }
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        if everyoneRE.firstMatch(in: text, range: range) != nil { return true }
+        return hints(in: text).names.contains { $0.caseInsensitiveCompare(username) == .orderedSame }
+    }
+}
+
 /// Сокет не подключён — сообщение не ушло, текст остаётся в поле ввода.
 struct NotConnectedError: LocalizedError {
     var errorDescription: String? { "Нет соединения с сервером. Сообщение не отправлено" }
@@ -181,47 +214,138 @@ final class MessageRepository {
 
     // MARK: - Отправка
 
-    func sendText(_ chatId: String, text: String, replyTo: Int64? = nil, quote: String? = nil, forwardedFrom: String? = nil) async throws {
+    /// Подсказка серверу об упоминаниях — только в группе и не для пересылки.
+    private func mentionExtra(_ chatId: String, text: String, forwarded: Bool) -> [String: JSONValue] {
+        guard Self.isGroup(chatId), !forwarded else { return [:] }
+        let hints = Mentions.hints(in: text)
+        var extra: [String: JSONValue] = [:]
+        if hints.all { extra["mention_all"] = .bool(true) }
+        if !hints.names.isEmpty { extra["mentions"] = .array(hints.names.map { .string($0) }) }
+        return extra
+    }
+
+    func sendText(_ chatId: String, text: String, replyTo: Int64? = nil, quote: String? = nil, forwardedFrom: String? = nil,
+                  crossReply: CrossReply? = nil) async throws {
         let keys = try await sendKeys(for: chatId)
-        let content: String
-        if let quote, !quote.trimmingCharacters(in: .whitespaces).isEmpty {
-            content = try MessageCrypto.encryptEnvelope(keys, Envelope(text: text, quote: String(quote.prefix(Self.quoteMax))))
-        } else {
-            content = try MessageCrypto.encryptText(keys, text)
-        }
-        if socket.sendMessage(receiver: chatId, content: content, replyTo: replyTo, forwardedFrom: forwardedFrom) { return }
+        var envelope = Envelope(text: text)
+        if let quote, !quote.trimmingCharacters(in: .whitespaces).isEmpty { envelope.quote = String(quote.prefix(Self.quoteMax)) }
+        envelope.crossReply = crossReply
+        // Простой текст — строкой, как в вебе; конверт — только если есть что в него класть
+        let content = try envelope.isPlainText
+            ? MessageCrypto.encryptText(keys, text)
+            : MessageCrypto.encryptEnvelope(keys, envelope)
+        let extra = mentionExtra(chatId, text: text, forwarded: forwardedFrom != nil)
+        if socket.sendMessage(receiver: chatId, content: content, replyTo: replyTo, forwardedFrom: forwardedFrom, extra: extra) { return }
         // Пересылку без сервера не проверить — честная ошибка; обычное — в очередь
         if forwardedFrom != nil { throw NotConnectedError() }
         enqueue(chatId: chatId, text: text, content: content, replyTo: replyTo, fileUrl: nil)
     }
 
     func sendAttachment(_ chatId: String, text: String, fileUrl: String, fileKeyB64: String, fileName: String,
-                        mimeType: String, replyTo: Int64? = nil, forwardedFrom: String? = nil) async throws {
+                        mimeType: String, replyTo: Int64? = nil, forwardedFrom: String? = nil,
+                        album: String? = nil, spoiler: Bool = false, viewOnce: Bool = false) async throws {
         let keys = try await sendKeys(for: chatId)
-        let content = try MessageCrypto.encryptEnvelope(keys, Envelope(text: text, fileKeyB64: fileKeyB64, fileName: fileName, mimeType: mimeType))
+        var envelope = Envelope(text: text, fileKeyB64: fileKeyB64, fileName: fileName, mimeType: mimeType)
+        envelope.album = album
+        // Спойлер — только у фото и видео, и не у одноразовых
+        envelope.spoiler = spoiler && !viewOnce && (mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/"))
+        let content = try MessageCrypto.encryptEnvelope(keys, envelope)
+        var extra = mentionExtra(chatId, text: text, forwarded: forwardedFrom != nil)
+        if viewOnce { extra["view_once"] = .bool(true) }
         // Файл ушёл зашифрованным, поэтому тип всегда двоичный поток:
         // настоящий MIME лежит в конверте, в поле m.
         if socket.sendMessage(receiver: chatId, content: content, fileUrl: fileUrl, fileType: RstApi.attachmentMime,
-                              replyTo: replyTo, forwardedFrom: forwardedFrom) { return }
-        if forwardedFrom != nil { throw NotConnectedError() }
+                              replyTo: replyTo, forwardedFrom: forwardedFrom, extra: extra) { return }
+        if forwardedFrom != nil || viewOnce { throw NotConnectedError() }
         // Файл уже на сервере, а сокет как раз переподключается — send ждёт в очереди
         enqueue(chatId: chatId, text: text.isEmpty ? "📎 Вложение" : text, content: content, replyTo: replyTo, fileUrl: fileUrl)
     }
 
-    /// Опрос: вопрос и варианты шифруются в конверте, серверу — только число вариантов.
-    func sendPoll(_ chatId: String, question: String, options: [String], multiple: Bool, anonymous: Bool, correct: Int?) async throws {
-        guard (2...10).contains(options.count) else { throw CryptoError("В опросе от 2 до 10 вариантов") }
+    /// Настройки нового опроса или чек-листа.
+    struct PollSpec {
+        var question: String
+        var options: [String]
+        var checklist = false
+        var multiple = false
+        var anonymous = true
+        /// Викторина: номер правильного варианта.
+        var correct: Int?
+        /// Участники добавляют свои варианты (не у викторины).
+        var openAdd = false
+        /// Итоги — только после завершения.
+        var hideResults = false
+        /// Закрыть сам в это время.
+        var closeAt: Date?
+    }
+
+    /// Опрос или чек-лист: вопрос и варианты шифруются в конверте, серверу — только число вариантов.
+    func sendPoll(_ chatId: String, spec: PollSpec) async throws {
+        if spec.checklist {
+            guard (1...30).contains(spec.options.count) else { throw CryptoError("В чек-листе от 1 до 30 пунктов") }
+        } else {
+            guard (2...10).contains(spec.options.count) else { throw CryptoError("В опросе от 2 до 10 вариантов") }
+        }
         let keys = try await sendKeys(for: chatId)
-        let content = try MessageCrypto.encryptEnvelope(keys, Envelope(text: "📊 " + question, poll: PollBody(question: question, options: options)))
-        var spec: [String: JSONValue] = [
-            "options": .number(Double(options.count)),
-            "multiple": .bool(multiple && correct == nil),
-            "anonymous": .bool(anonymous),
-        ]
-        if let correct { spec["correct"] = .number(Double(correct)) }
-        guard socket.sendMessage(receiver: chatId, content: content, fileType: MessageDto.fileTypePoll, poll: spec) else {
+        let body = PollBody(question: spec.question, options: spec.options, isChecklist: spec.checklist)
+        let prefix = spec.checklist ? "☑️ " : "📊 "
+        let content = try MessageCrypto.encryptEnvelope(keys, Envelope(text: prefix + spec.question, poll: body))
+        var poll: [String: JSONValue] = ["options": .number(Double(spec.options.count))]
+        if spec.checklist {
+            poll["kind"] = .string("checklist")
+            poll["open_add"] = .bool(spec.openAdd)
+        } else {
+            poll["multiple"] = .bool(spec.multiple && spec.correct == nil)
+            poll["anonymous"] = .bool(spec.anonymous)
+            if let correct = spec.correct { poll["correct"] = .number(Double(correct)) }
+            if spec.openAdd && spec.correct == nil { poll["open_add"] = .bool(true) }
+            if spec.hideResults { poll["hide_results"] = .bool(true) }
+            if let closeAt = spec.closeAt { poll["close_at"] = .string(ServerTime.iso(closeAt)) }
+        }
+        guard socket.sendMessage(receiver: chatId, content: content, fileType: MessageDto.fileTypePoll, poll: poll) else {
             throw NotConnectedError()
         }
+    }
+
+    /// Чек-лист: отметить или снять пункт.
+    func toggleCheck(messageId: Int64, option: Int) throws {
+        guard socket.sendCheckToggle(messageId: messageId, option: option) else { throw NotConnectedError() }
+    }
+
+    /// Свой вариант опроса или пункт чек-листа — зашифрован ключом чата, как сообщение.
+    func addPollOption(_ chatId: String, messageId: Int64, text: String) async throws {
+        let keys = try await sendKeys(for: chatId)
+        let content = try MessageCrypto.encryptText(keys, String(text.prefix(300)))
+        guard socket.sendPollAddOption(messageId: messageId, content: content) else { throw NotConnectedError() }
+    }
+
+    /// Одноразовое открыто: сервер стирает файл, обоим приходит view_once_opened.
+    func consumeViewOnce(_ id: Int64) async throws {
+        try await api.consumeViewOnce(id: id)
+    }
+
+    /// Варианты опроса с добавленными участниками, расшифрованные.
+    func pollOptions(_ body: PollBody, state: PollState, keys: ChatKeys?) -> [String] {
+        var extraTexts: [Int: String] = [:]
+        for item in state.extra {
+            if case .text(let t) = MessageCrypto.decrypt(keys, item.content) {
+                extraTexts[item.index] = t
+            } else if case .enveloped(let e) = MessageCrypto.decrypt(keys, item.content) {
+                extraTexts[item.index] = e.text
+            }
+        }
+        return Poll.mergedOptions(base: body.options, state: state, extraTexts: extraTexts)
+    }
+
+    /// Пересчитать варианты опроса по новому состоянию (poll_update).
+    func refreshPoll(_ poll: Poll, rawState: JSONValue, chatId: String, base: [String]) async -> Poll {
+        var updated = poll
+        let state = PollState(rawState) ?? poll.state
+        var keys: ChatKeys?
+        if let found = try? await readKeys(for: chatId) { keys = found }
+        updated.state = state
+        updated.options = pollOptions(PollBody(question: poll.question, options: base, isChecklist: state.isChecklist),
+                                      state: state, keys: keys)
+        return updated
     }
 
     /// Пересылка: файл не перезаливается — в новый конверт кладётся тот же ключ.
@@ -241,16 +365,16 @@ final class MessageRepository {
         }
     }
 
-    /// quote — q исходного сообщения: правка ответа цитатой её сохраняет.
-    func edit(_ chatId: String, messageId: Int64, text: String, quote: String?) async throws {
+    /// Правка: конверт собирается заново из исходного со всеми полями —
+    /// вложение (k/n/m), альбом, спойлер, цитата, ответ на историю, ответ из
+    /// другого чата и незнакомые поля сохраняются, прежний текст — в историю
+    /// правок e. Потеря любого поля сломала бы сообщение у остальных.
+    func edit(_ chatId: String, message: ChatMessage, newText: String) async throws {
         let keys = try await sendKeys(for: chatId)
-        let content: String
-        if let quote, !quote.isEmpty {
-            content = try MessageCrypto.encryptEnvelope(keys, Envelope(text: text, quote: quote))
-        } else {
-            content = try MessageCrypto.encryptText(keys, text)
-        }
-        guard socket.sendEdit(messageId: messageId, content: content, receiver: chatId) else { throw NotConnectedError() }
+        let original = message.envelope ?? Envelope(text: message.text)
+        let envelope = original.edited(newText: newText, previousText: message.text)
+        let content = try MessageCrypto.encryptEnvelope(keys, envelope)
+        guard socket.sendEdit(messageId: message.id, content: content, receiver: chatId) else { throw NotConnectedError() }
     }
 
     /// Шифр ключом «Избранного» — для черновиков: его знают только свои устройства.
@@ -305,6 +429,8 @@ final class MessageRepository {
             expiresAt: ServerTime.parse(dto.expiresAt),
             played: dto.played ?? true
         )
+        base.viewOnce = dto.viewOnce ?? false
+        base.isReminder = dto.reminder ?? false
 
         // Системные записи — открытый текст, расшифровывать нечего
         if dto.isSystem {
@@ -331,13 +457,15 @@ final class MessageRepository {
             base.text = t
             base.stickerUrl = sticker
         case .enveloped(let env):
-            if env.hasFile, let url = dto.fileUrl {
+            base.envelope = env
+            // У открытого одноразового file_url сервер стёр — вложения нет
+            if env.hasFile, let url = dto.fileUrl, !url.isEmpty {
                 base.attachment = Attachment(fileUrl: url, fileKeyB64: env.fileKeyB64 ?? "",
                                              fileName: env.fileName ?? "файл", mimeType: env.mimeType ?? RstApi.attachmentMime)
             }
             if let body = env.poll {
-                base.poll = Poll(question: body.question, options: body.options,
-                                 state: PollState(dto.poll) ?? PollState(options: body.options.count))
+                let state = PollState(dto.poll) ?? PollState(options: body.options.count, checklist: body.isChecklist)
+                base.poll = Poll(question: body.question, options: pollOptions(body, state: state, keys: keys), state: state)
             }
             // У опроса t — «📊 Вопрос» для старых клиентов; вопрос рисуем сами
             base.text = base.poll != nil ? "" : env.text
@@ -355,6 +483,11 @@ final class MessageRepository {
             } else {
                 base.undecryptable = true
             }
+        }
+        // Упоминание меня: сервер прислал очищенный список, иначе — по тексту
+        if !base.isMine {
+            base.mentionsMe = (dto.mentions ?? []).contains(me) || (dto.mentionAll ?? false)
+                || Mentions.mentions(me, in: base.text)
         }
         return base
     }

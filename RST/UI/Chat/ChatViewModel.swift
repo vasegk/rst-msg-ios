@@ -191,9 +191,15 @@ final class ChatViewModel {
             lastGroupRead = last.id
             services.socket.sendRead(messageId: last.id, sender: chatId)
         } else {
-            for m in messages where !m.isMine && !m.isRead && !m.isSystem && m.id > 0 {
-                services.socket.sendRead(messageId: m.id, sender: m.sender)
-                if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].status = "read" }
+            // С 2026-10-07 read с номером N отмечает всё чужое до N — хватает
+            // одного кадра для последнего непрочитанного
+            guard let last = messages.last(where: { !$0.isMine && !$0.isRead && !$0.isSystem && $0.id > 0 }) else {
+                services.chats.update(chatId) { $0.unread = 0 }
+                return
+            }
+            services.socket.sendRead(messageId: last.id, sender: last.sender)
+            for i in messages.indices where !messages[i].isMine && messages[i].id <= last.id {
+                messages[i].status = "read"
             }
         }
         services.chats.update(chatId) { $0.unread = 0 }
@@ -226,10 +232,14 @@ final class ChatViewModel {
                 if let found = try? await services.messages.readKeys(for: chatId) { keys = found }
                 var updated = old
                 switch MessageCrypto.decrypt(keys, content) {
-                case .text(let t): updated.text = t; updated.quote = nil
+                case .text(let t):
+                    updated.text = t
+                    updated.quote = nil
+                    updated.envelope = nil
                 case .enveloped(let e):
                     updated.text = e.text
                     updated.quote = e.quote
+                    updated.envelope = e
                     if let q = e.quote, !q.isEmpty { updated.reply?.text = q }
                     if e.geo != nil { updated.live = e.geo }
                 case .undecryptable: updated.undecryptable = true
@@ -244,9 +254,10 @@ final class ChatViewModel {
             if let i = messages.firstIndex(where: { $0.id == id }) {
                 messages[i].reactions = MessageRepository.parseReactions(reactions)
             }
-        case .messageRead(let id, let receiver, _):
+        case .messageRead(let id, let upTo, let receiver, _):
             guard !isGroup, belongs(receiver) else { return }
-            for i in messages.indices where messages[i].isMine && messages[i].id <= id && messages[i].id > 0 {
+            let limit = max(id, upTo)
+            for i in messages.indices where messages[i].isMine && messages[i].id <= limit && messages[i].id > 0 {
                 messages[i].status = "read"
             }
         case .groupRead(let group, _, let upTo):
@@ -262,12 +273,16 @@ final class ChatViewModel {
             messages[i].isPinned = isPinned
             Task { await loadPinned() }
         case .pollUpdate(let id, _, let poll, let my):
-            guard let i = messages.firstIndex(where: { $0.id == id }), var current = messages[i].poll else { return }
-            var state = PollState(poll) ?? current.state
-            // my приходит только моим устройствам; у остальных свой выбор не трогаем
-            state.my = my ?? current.state.my
-            current.state = state
-            messages[i].poll = current
+            guard let i = messages.firstIndex(where: { $0.id == id }), let current = messages[i].poll else { return }
+            let base = messages[i].envelope?.poll?.options ?? current.options
+            Task {
+                var updated = await services.messages.refreshPoll(current, rawState: poll, chatId: chatId, base: base)
+                // my приходит только моим устройствам; у остальных свой выбор не трогаем
+                updated.state.my = my ?? current.state.my
+                if let j = messages.firstIndex(where: { $0.id == id }) { messages[j].poll = updated }
+            }
+        case .other(let action, let payload):
+            handleOther(action, payload)
         case .messagePlayed(let id, _):
             if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].played = true }
         case .chatCleared(let target):
@@ -292,6 +307,20 @@ final class ChatViewModel {
         }
     }
 
+    private func handleOther(_ action: String, _ payload: JSONValue) {
+        switch action {
+        case "view_once_opened":
+            // Одноразовое открыли — у обоих файла больше нет
+            guard let id = payload["id"]?.int64, let i = messages.firstIndex(where: { $0.id == id }) else { return }
+            messages[i].attachment = nil
+        default:
+            break
+        }
+    }
+
+    /// Группа запретила пересылку и сохранение: меню без них, экран защищён.
+    var isProtected: Bool { summary?.isProtected ?? groupInfo?.isProtected ?? false }
+
     // MARK: - Отправка
 
     func send() {
@@ -308,7 +337,7 @@ final class ChatViewModel {
             defer { sending = false }
             do {
                 if let editTarget {
-                    try await services.messages.edit(chatId, messageId: editTarget.id, text: body, quote: editTarget.quote)
+                    try await services.messages.edit(chatId, message: editTarget, newText: body)
                 } else {
                     try await services.messages.sendText(chatId, text: body, replyTo: reply?.id)
                 }
@@ -322,28 +351,105 @@ final class ChatViewModel {
         }
     }
 
-    func sendAttachment(data: Data, fileName: String, mimeType: String, caption: String = "", compress: Bool = true) async {
+    /// Файл, выбранный к отправке.
+    struct OutgoingFile {
+        var data: Data
+        var fileName: String
+        var mimeType: String
+        /// Пережать фото (выбранное как документ — не трогаем).
+        var compress = true
+
+        var isVisual: Bool { mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/") }
+
+        /// Фото перед отправкой — JPEG до 2560 по длинной стороне, как в вебе.
+        func prepared() -> OutgoingFile {
+            guard compress, mimeType.hasPrefix("image/"), mimeType != "image/gif",
+                  let jpeg = AttachmentRepository.compressImage(data) else { return self }
+            let stem = (fileName as NSString).deletingPathExtension
+            return OutgoingFile(data: jpeg, fileName: (stem.isEmpty ? "photo" : stem) + ".jpg", mimeType: "image/jpeg", compress: false)
+        }
+    }
+
+    func sendAttachment(data: Data, fileName: String, mimeType: String, caption: String = "", compress: Bool = true,
+                        spoiler: Bool = false, viewOnce: Bool = false) async {
+        await sendFiles([OutgoingFile(data: data, fileName: fileName, mimeType: mimeType, compress: compress)],
+                        caption: caption, spoiler: spoiler, viewOnce: viewOnce)
+    }
+
+    /// Отправка вложений, как в вебе (альбомы, 2026-10-07): несколько выбранных
+    /// разом уходят альбомом — у каждого своё сообщение, общее поле a в
+    /// конверте. Фото и видео — альбомами по 10, остальные файлы — отдельными
+    /// альбомами по 10. Сначала шифруются и загружаются все файлы пачки, затем
+    /// сообщения уходят подряд. Подпись — у первого фото/видео; у одних
+    /// документов — отдельным текстом следом. Ответ — только у первого.
+    func sendFiles(_ files: [OutgoingFile], caption: String = "", spoiler: Bool = false, viewOnce: Bool = false) async {
+        guard !files.isEmpty else { return }
         sending = true
         defer { sending = false }
         do {
-            var payload = data
-            var mime = mimeType
-            var name = fileName
-            if compress && mimeType.hasPrefix("image/") && mimeType != "image/gif",
-               let compressed = AttachmentRepository.compressImage(data) {
-                payload = compressed
-                mime = "image/jpeg"
-                name = ((fileName as NSString).deletingPathExtension.isEmpty ? "photo" : (fileName as NSString).deletingPathExtension) + ".jpg"
-            }
-            // Ключ ждём до загрузки: иначе файл ушёл бы зря
+            // Ключ ждём до загрузки: иначе файлы ушли бы зря
             let keys = try await services.messages.keys(for: chatId)
             if keys.isKeyPending { throw GroupKeyPendingError() }
-            let uploaded = try await services.attachments.upload(payload)
-            try await services.messages.sendAttachment(chatId, text: caption, fileUrl: uploaded.fileUrl, fileKeyB64: uploaded.keyB64,
-                                                       fileName: name, mimeType: mime, replyTo: replyTo?.id)
+            let prepared = files.map { $0.prepared() }
+            let visual = prepared.filter(\.isVisual)
+            let documents = prepared.filter { !$0.isVisual }
+            var batches: [[OutgoingFile]] = []
+            for group in [visual, documents] where !group.isEmpty {
+                stride(from: 0, to: group.count, by: 10).forEach { batches.append(Array(group[$0..<min($0 + 10, group.count)])) }
+            }
+            var reply = replyTo?.id
+            var captionLeft = caption
+            for batch in batches {
+                var uploaded: [(OutgoingFile, AttachmentRepository.Uploaded)] = []
+                for file in batch {
+                    uploaded.append((file, try await services.attachments.upload(file.data)))
+                }
+                let album: String? = batch.count > 1 ? RstCrypto.randomBytes(8).hexString : nil
+                for (index, item) in uploaded.enumerated() {
+                    // Подпись — полем t первого фото/видео альбома
+                    let text = index == 0 && item.0.isVisual ? captionLeft : ""
+                    if !text.isEmpty { captionLeft = "" }
+                    try await services.messages.sendAttachment(
+                        chatId, text: text, fileUrl: item.1.fileUrl, fileKeyB64: item.1.keyB64,
+                        fileName: item.0.fileName, mimeType: item.0.mimeType, replyTo: reply,
+                        album: album, spoiler: spoiler && batch.count == 1, viewOnce: viewOnce && files.count == 1 && !isGroup)
+                    reply = nil
+                }
+            }
+            // Одни документы: подпись — отдельным сообщением следом
+            if !captionLeft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try await services.messages.sendText(chatId, text: captionLeft)
+            }
             replyTo = nil
         } catch {
             toast = errorText(error)
+        }
+    }
+
+    /// Одноразовое: скачать и расшифровать в память (без кэша) и сказать серверу.
+    func openViewOnce(_ m: ChatMessage) async -> Data? {
+        guard let a = m.attachment, !m.isMine else { return nil }
+        do {
+            let payload = try await services.api.download(a.fileUrl)
+            let plain = try FileCrypto.decrypt(payload, keyB64: a.fileKeyB64)
+            try? await services.messages.consumeViewOnce(m.id)
+            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].attachment = nil }
+            return plain
+        } catch {
+            toast = errorText(error)
+            return nil
+        }
+    }
+
+    func toggleCheck(_ m: ChatMessage, option: Int) {
+        do { try services.messages.toggleCheck(messageId: m.id, option: option) } catch { toast = errorText(error) }
+    }
+
+    func addPollOption(_ m: ChatMessage, text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        Task {
+            do { try await services.messages.addPollOption(chatId, messageId: m.id, text: value) } catch { toast = errorText(error) }
         }
     }
 
@@ -356,10 +462,9 @@ final class ChatViewModel {
         try? FileManager.default.removeItem(at: url)
     }
 
-    func sendPoll(question: String, options: [String], multiple: Bool, anonymous: Bool, correct: Int?) async -> Bool {
+    func sendPoll(_ spec: MessageRepository.PollSpec) async -> Bool {
         do {
-            try await services.messages.sendPoll(chatId, question: question, options: options, multiple: multiple,
-                                                 anonymous: anonymous, correct: correct)
+            try await services.messages.sendPoll(chatId, spec: spec)
             return true
         } catch {
             toast = errorText(error)

@@ -16,6 +16,10 @@ struct MessageRow: View {
     var onReactionsList: (ChatMessage) -> Void = { _ in }
     var onOpenProfile: (String) -> Void = { _ in }
     var onConfirmLink: (String) -> Void = { _ in }
+    /// Открыть другой чат на сообщении (напоминание, карточка контакта).
+    var onOpenChat: (String, Int64) -> Void = { _, _ in }
+    var onShowEdits: (ChatMessage) -> Void = { _ in }
+    var onOpenViewOnce: (ChatMessage) -> Void = { _ in }
 
     @Environment(ChatListStore.self) private var store
     @Environment(\.openURL) private var openURL
@@ -81,7 +85,20 @@ struct MessageRow: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.avatarGradient(for: store.displayName(message.sender)).0)
                         if store.users[message.sender]?.verified == true { VerifiedBadge(size: 11) }
+                        if let emoji = store.emojiStatus(of: message.sender) { Text(emoji).font(.system(size: 12)) }
                     }
+                }
+                if let remind = message.remind, message.isReminder || model.isSaved {
+                    // Напоминание: нажатие — к исходному сообщению в его чате
+                    Button { onOpenChat(remind.chat, remind.messageId) } label: {
+                        Label("Напоминание · \(remind.name.isEmpty ? store.title(for: remind.chat) : remind.name)", systemImage: "bell.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(message.isMine ? Color.white.opacity(0.9) : Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let x = message.crossReply {
+                    CrossReplyQuote(reply: x, isMine: message.isMine)
                 }
                 if let from = message.forwardedFrom {
                     Label("Переслано от \(store.displayName(from))", systemImage: "arrowshape.turn.up.right.fill")
@@ -131,9 +148,15 @@ struct MessageRow: View {
             Label("Не удалось расшифровать сообщение", systemImage: "lock.fill")
                 .font(.system(size: 14))
                 .opacity(0.8)
+        } else if message.viewOnce {
+            ViewOnceBadge(message: message) { onOpenViewOnce(message) }
         } else {
             if let a = message.attachment {
-                attachmentView(a)
+                if message.spoiler && (a.isImage || a.isVideo) {
+                    SpoilerContainer { attachmentView(a) }
+                } else {
+                    attachmentView(a)
+                }
             }
             if let poll = message.poll {
                 PollView(message: message, poll: poll, model: model)
@@ -141,11 +164,20 @@ struct MessageRow: View {
             if let live = message.live {
                 LiveLocationCard(geo: live, isMine: message.isMine)
             }
-            if !message.text.isEmpty && !isServiceCaption {
+            if let contact = message.contact {
+                ContactCard(contact: contact, isMine: message.isMine) { onOpenChat(contact.username, 0) }
+            } else if !message.text.isEmpty && !isServiceCaption && !isFileNameCaption {
                 MessageTextView(text: message.text, isMine: message.isMine)
                     .environment(\.openURL, OpenURLAction { url in handleLink(url) })
             }
         }
+    }
+
+    /// У видео t, похожий на имя файла («имя.mp4» без пробелов), подписью не считается.
+    private var isFileNameCaption: Bool {
+        guard let a = message.attachment, a.isVideo || !a.isImage else { return false }
+        let t = message.text
+        return t == a.fileName || (!t.contains(" ") && t.range(of: #"^[^\s]+\.[A-Za-z0-9]{2,5}$"#, options: .regularExpression) != nil)
     }
 
     /// Подпись «🎤 Голосовое сообщение» у голосового и кружка — служебная, не показываем.
@@ -171,7 +203,17 @@ struct MessageRow: View {
     private var footer: some View {
         HStack(spacing: 4) {
             if message.isPinned { Image(systemName: "pin.fill").font(.system(size: 9)) }
-            if message.isEdited { Text("изменено").font(.system(size: 11)) }
+            if message.isEdited {
+                // Есть прежние версии — «изменено» открывает историю правок
+                if message.edits.isEmpty {
+                    Text("изменено").font(.system(size: 11))
+                } else {
+                    Text("изменено")
+                        .font(.system(size: 11))
+                        .underline(pattern: .dot)
+                        .onTapGesture { onShowEdits(message) }
+                }
+            }
             if message.expiresAt != nil { Image(systemName: "timer").font(.system(size: 9)) }
             Text(TimeFormat.clock(message.createdAt)).font(.system(size: 11))
             if message.isMine {
@@ -199,19 +241,24 @@ struct MessageRow: View {
                 Button { model.startReply(message) } label: { Label("Ответить", systemImage: "arrowshape.turn.up.left") }
             }
         }
-        if !message.text.isEmpty && !message.undecryptable {
+        // Защищённая группа и одноразовые: без копирования и пересылки
+        if !message.text.isEmpty && !message.undecryptable && !model.isProtected && !message.viewOnce {
             Button { UIPasteboard.general.string = TextFormat.strip(message.text) } label: { Label("Копировать", systemImage: "doc.on.doc") }
         }
         if !message.pending {
-            if message.isMine && message.poll == nil && message.live == nil && !message.isAutoreply && message.stickerUrl == nil && !message.undecryptable {
+            if message.isMine && message.poll == nil && message.live == nil && !message.isAutoreply
+                && message.stickerUrl == nil && !message.undecryptable && !message.viewOnce && message.contact == nil {
                 Button { model.startEdit(message) } label: { Label("Изменить", systemImage: "pencil") }
+            }
+            if !message.edits.isEmpty {
+                Button { onShowEdits(message) } label: { Label("История правок", systemImage: "clock.arrow.circlepath") }
             }
             if !model.isGroup || model.canModerate {
                 Button { model.togglePin(message) } label: {
                     Label(message.isPinned ? "Открепить" : "Закрепить", systemImage: message.isPinned ? "pin.slash" : "pin")
                 }
             }
-            if !message.undecryptable {
+            if !message.undecryptable && !message.viewOnce && !model.isProtected {
                 Button { onForward(message) } label: { Label("Переслать", systemImage: "arrowshape.turn.up.right") }
             }
             if !message.reactions.isEmpty && model.isGroup {
@@ -239,7 +286,9 @@ struct MessageRow: View {
     private func handleLink(_ url: URL) -> OpenURLAction.Result {
         if url.scheme == "rstmsg" {
             if url.host == "mention" {
-                onOpenProfile(url.lastPathComponent)
+                // @все/@онлайн — подсветка без перехода в профиль
+                let name = url.lastPathComponent
+                if !Mentions.special.contains(name.lowercased()) { onOpenProfile(name) }
                 return .handled
             }
             if url.host == "confirm",
@@ -343,33 +392,62 @@ struct ReactionsRow: View {
 }
 
 /// Опрос: голосование и итоги после своего голоса или завершения.
+/// Чек-лист: пункты отмечают участники, «Выполнено N из M».
 struct PollView: View {
     let message: ChatMessage
     let poll: Poll
     let model: ChatViewModel
+    @Environment(ChatListStore.self) private var store
     @State private var selection: Set<Int> = []
+    @State private var adding = false
+    @State private var newOption = ""
 
     private var state: PollState { poll.state }
     private var total: Int { max(state.counts.reduce(0, +), 1) }
+    /// Свой вариант: можно, если open_add или ты автор; не в закрытом и не в викторине.
+    private var canAdd: Bool {
+        guard !state.closed, !state.quiz else { return false }
+        let limit = state.isChecklist ? 50 : 20
+        return (state.openAdd || message.isMine) && poll.options.count < limit
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(poll.question).font(.system(size: 16, weight: .semibold))
             Text(caption).font(.system(size: 12)).opacity(0.75)
             ForEach(Array(poll.options.enumerated()), id: \.offset) { index, option in
-                optionRow(index, option)
+                if state.isChecklist {
+                    checkRow(index, option)
+                } else {
+                    optionRow(index, option)
+                }
+            }
+            if canAdd {
+                if adding {
+                    HStack {
+                        TextField(state.isChecklist ? "Пункт" : "Свой вариант", text: $newOption)
+                            .textFieldStyle(.roundedBorder)
+                            .foregroundStyle(Theme.onSurface)
+                            .onSubmit(addOption)
+                        Button("OK", action: addOption).disabled(newOption.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                } else {
+                    Button(state.isChecklist ? "+ Пункт" : "+ Свой вариант") { adding = true }
+                        .font(.system(size: 14))
+                        .buttonStyle(.plain)
+                }
             }
             HStack {
-                if state.multiple && !poll.showResults && !selection.isEmpty {
+                if !state.isChecklist && state.multiple && !poll.showResults && state.my.isEmpty && !selection.isEmpty {
                     Button("Голосовать") { model.vote(message, options: selection.sorted()) }
                         .font(.system(size: 14, weight: .semibold))
                 }
-                if poll.showResults && !state.closed && !state.quiz && !state.my.isEmpty {
+                if !state.isChecklist && !state.closed && !state.quiz && !state.my.isEmpty {
                     Button("Отменить голос") { model.vote(message, options: []) }
                         .font(.system(size: 13))
                 }
                 Spacer()
-                if message.isMine && !state.closed {
+                if message.isMine && !state.closed && !state.isChecklist {
                     Button("Завершить") { model.closePoll(message) }
                         .font(.system(size: 13))
                 }
@@ -380,13 +458,56 @@ struct PollView: View {
         .frame(minWidth: 220)
     }
 
+    private func addOption() {
+        model.addPollOption(message, text: newOption)
+        newOption = ""
+        adding = false
+    }
+
     private var caption: String {
+        if state.isChecklist {
+            let done = (0..<poll.options.count).filter { !voters($0).isEmpty }.count
+            return "Чек-лист · выполнено \(done) из \(poll.options.count)"
+        }
         var parts: [String] = []
         parts.append(state.quiz ? "Викторина" : (state.anonymous ? "Анонимный опрос" : "Открытый опрос"))
         if state.multiple { parts.append("несколько ответов") }
-        parts.append("голосов: \(state.voters)")
+        if state.hidden && !state.my.isEmpty {
+            parts.append("\(state.voters) \(state.voters == 1 ? "голос" : "голосов") · ваш голос учтён")
+        } else {
+            parts.append("голосов: \(state.voters)")
+        }
+        if state.hideResults && !state.closed { parts.append("итоги после завершения") }
+        if let closeAt = state.closeAt, !state.closed {
+            parts.append("до \(TimeFormat.dayHeader(closeAt).lowercased()), \(TimeFormat.clock(closeAt))")
+        }
         if state.closed { parts.append("завершён") }
         return parts.joined(separator: " · ")
+    }
+
+    private func voters(_ index: Int) -> [String] {
+        index < state.votersByOption.count ? state.votersByOption[index] : []
+    }
+
+    /// Пункт чек-листа: квадратная галочка, отмеченный зачёркнут, справа — кто отметил.
+    private func checkRow(_ index: Int, _ option: String) -> some View {
+        let who = voters(index)
+        let done = !who.isEmpty || (index < state.counts.count && state.counts[index] > 0)
+        return Button { model.toggleCheck(message, option: index) } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: done ? "checkmark.square.fill" : "square")
+                Text(option)
+                    .font(.system(size: 15))
+                    .strikethrough(done)
+                    .opacity(done ? 0.7 : 1)
+                Spacer()
+                if let first = who.first {
+                    Text(store.displayName(first)).font(.system(size: 12)).opacity(0.75)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(state.closed)
     }
 
     @ViewBuilder
@@ -395,7 +516,8 @@ struct PollView: View {
         let percent = Double(count) / Double(total)
         let chosen = state.my.contains(index) || selection.contains(index)
         Button {
-            guard !poll.showResults, !state.closed else { return }
+            // Проголосовал — варианты не нажимаются (и при скрытых итогах)
+            guard !poll.showResults, !state.closed, state.my.isEmpty else { return }
             if state.multiple {
                 if selection.contains(index) { selection.remove(index) } else { selection.insert(index) }
             } else {
@@ -426,6 +548,145 @@ struct PollView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Ответ на сообщение из другого чата: «Автор · Имя чата» и текст; не нажимается.
+struct CrossReplyQuote: View {
+    let reply: CrossReply
+    let isMine: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(isMine ? Color.white : Theme.accent)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(reply.author) · \(reply.chatName.isEmpty ? "из другого чата" : reply.chatName)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isMine ? Color.white : Theme.accent)
+                    .lineLimit(1)
+                Text(Previews.oneLine(TextFormat.strip(reply.text)))
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .opacity(0.85)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: 260, alignment: .leading)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Карточка контакта: аватар, имя, @ник и «Написать».
+struct ContactCard: View {
+    let contact: ContactRef
+    let isMine: Bool
+    var onWrite: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                AvatarView(name: contact.name.isEmpty ? contact.username : contact.name, url: nil, size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(contact.name.isEmpty ? contact.username : contact.name)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("@" + contact.username).font(.system(size: 13)).opacity(0.8)
+                }
+            }
+            Button(action: onWrite) {
+                Text("Написать")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(isMine ? Color.white.opacity(0.22) : Theme.accent.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(minWidth: 200)
+    }
+}
+
+/// Одноразовое фото или видео: кнопка «открыть один раз», после — «Просмотрено».
+struct ViewOnceBadge: View {
+    let message: ChatMessage
+    var onOpen: () -> Void
+
+    private var kind: String { (message.attachment?.isVideo ?? message.envelope?.mimeType?.hasPrefix("video/") ?? false) ? "видео" : "фото" }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: message.viewOnceConsumed ? "eye.slash" : "flame.fill")
+                .font(.system(size: 20))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Одноразовое \(kind)").font(.system(size: 15, weight: .semibold))
+                Text(subtitle).font(.system(size: 12)).opacity(0.8)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { if !message.isMine && !message.viewOnceConsumed { onOpen() } }
+    }
+
+    private var subtitle: String {
+        if message.viewOnceConsumed { return "Просмотрено" }
+        return message.isMine ? "Откроется один раз" : "Нажмите, чтобы открыть"
+    }
+}
+
+/// Фото/видео под спойлером: размыто, пока не нажмут; первое нажатие только раскрывает.
+struct SpoilerContainer<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @State private var revealed = false
+
+    var body: some View {
+        ZStack {
+            content()
+                .blur(radius: revealed ? 0 : 24)
+                .allowsHitTesting(revealed)
+            if !revealed {
+                Text("Спойлер")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.45)))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture { if !revealed { withAnimation(.easeOut(duration: 0.25)) { revealed = true } } }
+    }
+}
+
+/// История правок: «Сейчас» и прежние версии, новые сверху.
+struct EditHistorySheet: View {
+    let message: ChatMessage
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Сейчас") {
+                    Text(message.text).textSelection(.enabled)
+                }
+                Section("Прежние версии") {
+                    ForEach(Array(message.edits.reversed().enumerated()), id: \.offset) { _, version in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(version.text).textSelection(.enabled)
+                            if let date = version.date {
+                                Text("\(TimeFormat.dayHeader(date)), \(TimeFormat.clock(date))")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("История правок")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 

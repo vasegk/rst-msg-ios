@@ -326,6 +326,87 @@ final class CryptoCompatibilityTests: XCTestCase {
         XCTAssertEqual(derived.authHex, "ae2d1eb83398b62b40a1f8a9977aeb5005abbc08bd94a2af44a3c66d2c20db16")
     }
 
+    // MARK: - Конверт: новые поля веба и правка
+
+    /// Своя правка собирает конверт заново со всеми полями исходного —
+    /// иначе iOS стирает вложение, альбом, спойлер, цитату и историю у остальных.
+    func testEditPreservesEveryEnvelopeField() throws {
+        let web = #"{"__rst":1,"t":"подпись","k":"S0VZ","n":"photo.jpg","m":"image/jpeg","a":"3f2a9c","h":1,"q":"фрагмент","x":{"a":"Иван","t":"исходник","n":"Работа"},"s":{"a":"ivan","id":7},"e":[{"t":"самая первая","at":1792304646618}],"zz":{"future":true}}"#
+        let env = try XCTUnwrap(Envelope.parse(web))
+        let edited = env.edited(newText: "новая подпись", previousText: "подпись", at: Date(timeIntervalSince1970: 1_800_000_000))
+        let round = try XCTUnwrap(Envelope.parse(edited.json))
+
+        XCTAssertEqual(round.text, "новая подпись")
+        XCTAssertEqual(round.fileKeyB64, "S0VZ")
+        XCTAssertEqual(round.fileName, "photo.jpg")
+        XCTAssertEqual(round.mimeType, "image/jpeg")
+        XCTAssertEqual(round.album, "3f2a9c")
+        XCTAssertTrue(round.spoiler)
+        XCTAssertEqual(round.quote, "фрагмент")
+        XCTAssertEqual(round.crossReply?.chatName, "Работа")
+        XCTAssertEqual(round.story?.id, 7)
+        XCTAssertEqual(round.edits.map(\.text), ["самая первая", "подпись"])
+        XCTAssertEqual(round.edits.last?.at, 1_800_000_000_000)
+        // Поле, которого iOS не знает, уходит обратно как было
+        XCTAssertEqual(round.unknown["zz"]?["future"]?.bool, true)
+    }
+
+    func testEditHistoryKeepsLastTen() {
+        var env = Envelope(text: "v0")
+        for i in 1...12 { env = env.edited(newText: "v\(i)", previousText: "v\(i - 1)") }
+        XCTAssertEqual(env.edits.count, 10)
+        XCTAssertEqual(env.edits.first?.text, "v2")
+        XCTAssertEqual(env.text, "v12")
+    }
+
+    func testContactReminderAndInvalidFields() throws {
+        let env = try XCTUnwrap(Envelope.parse(#"{"__rst":1,"t":"👤 Контакт: Иван (@ivan)","c":{"u":"ivan","n":"Иван"},"r":{"c":"group_3","i":42,"n":"Работа"},"a":"плохой альбом","h":2}"#))
+        XCTAssertEqual(env.contact, ContactRef(username: "ivan", name: "Иван"))
+        XCTAssertEqual(env.remind?.chat, "group_3")
+        XCTAssertEqual(env.remind?.messageId, 42)
+        // Неверные значения игнорируются, а не ломают разбор
+        XCTAssertNil(env.album)
+        XCTAssertFalse(env.spoiler)
+        XCTAssertNil(Envelope.parse(#"{"__rst":1,"t":"x","c":{"u":"не ник"}}"#)?.contact)
+    }
+
+    func testPlainTextStaysString() {
+        XCTAssertTrue(Envelope(text: "просто").isPlainText)
+        var withQuote = Envelope(text: "ответ")
+        withQuote.quote = "фрагмент"
+        XCTAssertFalse(withQuote.isPlainText)
+    }
+
+    func testChecklistBodyRoundTrip() throws {
+        let body = PollBody(question: "Покупки", options: ["Хлеб", "Молоко"], isChecklist: true)
+        let env = try XCTUnwrap(Envelope.parse(Envelope(text: "☑️ Покупки", poll: body).json))
+        XCTAssertEqual(env.poll?.isChecklist, true)
+        XCTAssertEqual(env.poll?.options, ["Хлеб", "Молоко"])
+    }
+
+    func testMentionHints() {
+        let hints = Mentions.hints(in: "@все смотрите, @ivan и @Petr_1, ещё раз @ivan, почта a@b.ru, @online")
+        XCTAssertTrue(hints.all)
+        XCTAssertEqual(hints.names, ["ivan", "Petr_1"])
+        XCTAssertTrue(Mentions.mentions("IVAN", in: "привет @ivan"))
+        XCTAssertTrue(Mentions.mentions("kate", in: "@онлайн кто тут?"))
+        XCTAssertFalse(Mentions.mentions("kate", in: "@всем привет"))
+        XCTAssertFalse(Mentions.hints(in: "@всем").all)
+    }
+
+    func testPollStateNewFields() {
+        let raw = JSONValue.parse(#"{"options":3,"kind":"checklist","hidden":true,"open_add":true,"close_at":"2026-10-25T09:00:00Z","voters_by_option":[["ivan"],[],["kate"]],"extra":[{"i":2,"by":"kate","content":"{\"iv\":\"a\",\"ciphertext\":\"b\"}"}]}"#)
+        let state = PollState(raw)
+        XCTAssertEqual(state?.isChecklist, true)
+        XCTAssertEqual(state?.hidden, true)
+        XCTAssertEqual(state?.openAdd, true)
+        XCTAssertNotNil(state?.closeAt)
+        XCTAssertEqual(state?.votersByOption, [["ivan"], [], ["kate"]])
+        XCTAssertEqual(state?.extra.first?.index, 2)
+        let merged = Poll.mergedOptions(base: ["А", "Б"], state: state!, extraTexts: [2: "В"])
+        XCTAssertEqual(merged, ["А", "Б", "В"])
+    }
+
     func testTokenExpiry() {
         func token(exp: TimeInterval) -> String {
             let payload = Data(#"{"sub":"ivan","exp":\#(Int(exp))}"#.utf8).base64URLEncodedString

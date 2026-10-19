@@ -253,7 +253,44 @@ final class RstApi {
 
     func joinPublic(groupId: String) async throws { try await send("POST", "/api/groups/join_public", JoinPublicRequest(groupId: groupId)) }
 
+    /// Вступление по ссылке: ok / already_member / requested (заявка ждёт админов).
     func resolveInvite(_ hash: String) async throws -> JoinByHashResponse { try await get("/api/groups/join/\(path(hash))") }
+
+    /// Предпросмотр группы по ссылке — ничего не меняет.
+    func joinPreview(_ hash: String) async throws -> JoinPreviewResponse {
+        try await get("/api/groups/join/\(path(hash))/preview")
+    }
+
+    // MARK: - Одноразовые, реакции, эмодзи-статус
+
+    /// Одноразовое открыто: сервер стирает файл и рассылает view_once_opened.
+    func consumeViewOnce(id: Int64) async throws {
+        try await send("POST", "/api/messages/\(id)/consume", EmptyBody())
+    }
+
+    func reactionsUnread(chat: String) async throws -> ReactionsUnreadResponse {
+        try await get("/api/reactions/unread?chat=\(queryEncoded(chat))")
+    }
+
+    func reactionsSeen(chat: String, ids: [Int64]) async throws {
+        try await send("POST", "/api/reactions/seen", ReactionsSeenRequest(chat: chat, ids: ids))
+    }
+
+    struct EmojiStatusRequest: Encodable {
+        let emoji: String
+        /// nil уходит как null — бессрочно.
+        let until: String?
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(emoji, forKey: .emoji)
+            try c.encode(until, forKey: .until)
+        }
+        enum CodingKeys: String, CodingKey { case emoji, until }
+    }
+
+    func setEmojiStatus(_ emoji: String, until: Date?) async throws {
+        try await send("PUT", "/api/emoji_status", EmojiStatusRequest(emoji: emoji, until: until.map { ServerTime.iso($0) }))
+    }
 
     func updateGroup(_ request: GroupUpdateRequest) async throws { try await send("POST", "/api/groups/update", request) }
 

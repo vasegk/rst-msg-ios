@@ -363,6 +363,11 @@ struct ChatRow: View {
                         .foregroundStyle(Theme.onSurface)
                         .lineLimit(1)
                     if chat.verified { VerifiedBadge(size: 13) }
+                    // Эмодзи-статус; у «Избранного» свой не показываем
+                    if chat.chatId != store.me, let emoji = chat.activeEmojiStatus { Text(emoji).font(.system(size: 14)) }
+                    if chat.unreadReactions > 0 {
+                        Image(systemName: "heart.fill").font(.system(size: 11)).foregroundStyle(Theme.danger)
+                    }
                     if chat.muted {
                         Image(systemName: "speaker.slash.fill").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     }

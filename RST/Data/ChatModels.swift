@@ -31,8 +31,24 @@ struct ChatMessage: Identifiable, Equatable {
     var storyRef: StoryRef?
     /// Ждёт отправки (нет связи) — рисуется с часиками.
     var pending = false
+    /// Исходный конверт: правка собирает новый из него, ничего не теряя.
+    var envelope: Envelope?
+    /// Одноразовое фото/видео (только в личке): открыть один раз, без кэша.
+    var viewOnce = false
+    /// Пришло как напоминание в Избранное.
+    var isReminder = false
+    /// В тексте упоминание меня (@ник, @все, @онлайн) — для кнопки «@».
+    var mentionsMe = false
 
     var isRead: Bool { status == "read" }
+    var album: String? { envelope?.album }
+    var spoiler: Bool { envelope?.spoiler ?? false }
+    var contact: ContactRef? { envelope?.contact }
+    var edits: [EditVersion] { envelope?.edits ?? [] }
+    var crossReply: CrossReply? { envelope?.crossReply }
+    var remind: RemindRef? { envelope?.remind }
+    /// Одноразовое уже открыли — файла на сервере больше нет.
+    var viewOnceConsumed: Bool { viewOnce && attachment == nil }
 }
 
 /// Вложение. Ключ файла живёт в конверте внутри зашифрованного content —
@@ -55,14 +71,27 @@ struct ReplyPreview: Equatable {
     var undecryptable = false
 }
 
-/// Опрос: вопрос и варианты расшифрованы из конверта, состояние — от сервера.
+/// Опрос или чек-лист: вопрос и варианты расшифрованы из конверта, состояние — от сервера.
 struct Poll: Equatable {
     var question: String
+    /// Варианты из конверта плюс добавленные участниками (extra), по номерам.
     var options: [String]
     var state: PollState
 
-    /// Результаты показываем после своего голоса или после завершения.
-    var showResults: Bool { state.closed || !state.my.isEmpty }
+    var isChecklist: Bool { state.isChecklist }
+
+    /// Результаты показываем после своего голоса или после завершения;
+    /// при скрытых итогах — только после завершения.
+    var showResults: Bool {
+        if state.hidden { return false }
+        return state.closed || !state.my.isEmpty
+    }
+
+    /// Варианты по порядку: свои из конверта, затем добавленные (текст уже расшифрован).
+    static func mergedOptions(base: [String], state: PollState, extraTexts: [Int: String]) -> [String] {
+        let count = max(state.options, base.count)
+        return (0..<count).map { i in i < base.count ? base[i] : (extraTexts[i] ?? "…") }
+    }
 }
 
 struct PollState: Equatable {
@@ -75,8 +104,24 @@ struct PollState: Equatable {
     var my: [Int] = []
     var quiz = false
     var correct: Int?
+    /// "checklist" — чек-лист (с 2026-10-18).
+    var kind = "poll"
+    /// Итоги скрыты до завершения: counts нули, voters_by_option нет.
+    var hidden = false
+    var hideResults = false
+    var openAdd = false
+    var closeAt: Date?
+    /// Кто за какой вариант (открытый опрос и чек-лист).
+    var votersByOption: [[String]] = []
+    /// Варианты, добавленные участниками: номер, кто добавил, шифротекст.
+    var extra: [PollExtra] = []
 
-    init(options: Int) { self.options = options }
+    var isChecklist: Bool { kind == "checklist" }
+
+    init(options: Int, checklist: Bool = false) {
+        self.options = options
+        if checklist { kind = "checklist" }
+    }
 
     init?(_ raw: JSONValue?) {
         guard let raw, raw.object != nil else { return nil }
@@ -89,7 +134,24 @@ struct PollState: Equatable {
         my = raw["my"]?.array?.compactMap { $0.int } ?? []
         quiz = raw["quiz"]?.bool ?? false
         correct = raw["correct"]?.int
+        kind = raw["kind"]?.stringValue ?? "poll"
+        hidden = raw["hidden"]?.bool ?? false
+        hideResults = raw["hide_results"]?.bool ?? false
+        openAdd = raw["open_add"]?.bool ?? false
+        closeAt = ServerTime.parse(raw["close_at"]?.stringValue)
+        votersByOption = (raw["voters_by_option"]?.array ?? []).map { ($0.array ?? []).compactMap { $0.stringValue } }
+        extra = (raw["extra"]?.array ?? []).compactMap { item in
+            guard let i = item["i"]?.int, let content = item["content"]?.stringValue else { return nil }
+            return PollExtra(index: i, by: item["by"]?.stringValue ?? "", content: content)
+        }
     }
+}
+
+struct PollExtra: Equatable {
+    var index: Int
+    var by: String
+    /// Текст варианта, зашифрованный ключом чата как сообщение.
+    var content: String
 }
 
 /// Строка списка чатов — общий вид для личных переписок и групп.
@@ -117,8 +179,21 @@ struct ChatSummary: Identifiable, Equatable {
     var myRole = "member"
     var isChannel = false
     var isForum = false
+    /// Сообщений с новыми реакциями на мои — значок «❤» в строке.
+    var unreadReactions = 0
+    /// Группа запретила пересылку и сохранение.
+    var isProtected = false
+    var emojiStatus: String?
+    var emojiStatusUntil: Date?
 
     var id: String { chatId }
+
+    /// Эмодзи-статус, если не истёк (сервер не отдаёт истёкший, но проверяем и сами).
+    var activeEmojiStatus: String? {
+        guard let emoji = emojiStatus, !emoji.isEmpty else { return nil }
+        if let until = emojiStatusUntil, until <= Date() { return nil }
+        return emoji
+    }
     var isDeleted: Bool { status == "deleted" }
 
     /// Писать в группу «только для администраторов» могут owner, admin, editor.
@@ -150,6 +225,9 @@ struct ChatSummary: Identifiable, Equatable {
         isSystem = u.isSystem ?? false
         bio = u.bio
         verified = u.verified ?? false
+        unreadReactions = u.unreadReactions ?? 0
+        emojiStatus = u.emojiStatus
+        emojiStatusUntil = ServerTime.parse(u.emojiStatusUntil)
     }
 
     init(group g: ContactGroupDto) {
@@ -169,6 +247,8 @@ struct ChatSummary: Identifiable, Equatable {
         myRole = g.myRole ?? "member"
         isChannel = g.kind == "channel"
         isForum = g.forum ?? false
+        unreadReactions = g.unreadReactions ?? 0
+        isProtected = g.isProtected ?? false
     }
 }
 

@@ -13,6 +13,8 @@ struct ComposerView: View {
     @State private var showFiles = false
     @State private var showPoll = false
     @State private var recorder = VoiceRecorder()
+    /// Выбрано одно фото/видео — спросить: обычное, под спойлером, одноразовое.
+    @State private var singleVisual: ChatViewModel.OutgoingFile?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -43,6 +45,22 @@ struct ComposerView: View {
             if case .success(let urls) = result { Task { await sendFiles(urls) } }
         }
         .sheet(isPresented: $showPoll) { PollComposer(model: model) }
+        .confirmationDialog("Отправить", isPresented: Binding(
+            get: { singleVisual != nil }, set: { if !$0 { singleVisual = nil } }), titleVisibility: .hidden) {
+            Button("Отправить") { sendSingle() }
+            Button("Скрыть под спойлер") { sendSingle(spoiler: true) }
+            // Одноразовое — только в личке и не себе
+            if !model.isGroup && !model.isSaved {
+                Button("Одноразовое: откроют один раз") { sendSingle(viewOnce: true) }
+            }
+            Button("Отмена", role: .cancel) { singleVisual = nil }
+        }
+    }
+
+    private func sendSingle(spoiler: Bool = false, viewOnce: Bool = false) {
+        guard let file = singleVisual else { return }
+        singleVisual = nil
+        Task { await sendWithCaption([file], spoiler: spoiler, viewOnce: viewOnce) }
     }
 
     private var blockedText: String {
@@ -165,6 +183,7 @@ struct ComposerView: View {
     }
 
     private func sendPhotos(_ items: [PhotosPickerItem]) async {
+        var files: [ChatViewModel.OutgoingFile] = []
         for item in items {
             let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
             guard let data = try? await item.loadTransferable(type: Data.self) else {
@@ -175,17 +194,25 @@ struct ComposerView: View {
                 let type = item.supportedContentTypes.first { $0.conforms(to: .movie) }
                 let ext = type?.preferredFilenameExtension ?? "mp4"
                 let mime = type?.preferredMIMEType ?? "video/mp4"
-                await model.sendAttachment(data: data, fileName: "video.\(ext)", mimeType: mime)
+                files.append(.init(data: data, fileName: "video.\(ext)", mimeType: mime))
             } else {
                 let type = item.supportedContentTypes.first { $0.conforms(to: .image) }
                 let mime = type?.preferredMIMEType ?? "image/jpeg"
                 let ext = type?.preferredFilenameExtension ?? "jpg"
-                await model.sendAttachment(data: data, fileName: "photo.\(ext)", mimeType: mime)
+                files.append(.init(data: data, fileName: "photo.\(ext)", mimeType: mime))
             }
         }
+        guard !files.isEmpty else { return }
+        // Одно фото/видео — можно под спойлер или одноразовым (в личке)
+        if files.count == 1 {
+            singleVisual = files[0]
+            return
+        }
+        await sendWithCaption(files)
     }
 
     private func sendFiles(_ urls: [URL]) async {
+        var files: [ChatViewModel.OutgoingFile] = []
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -195,8 +222,17 @@ struct ComposerView: View {
             }
             let mime = AttachmentRepository.mimeType(forExtension: url.pathExtension)
             // Файл, выбранный как документ, не пережимаем — даже если это картинка
-            await model.sendAttachment(data: data, fileName: url.lastPathComponent, mimeType: mime, compress: false)
+            files.append(.init(data: data, fileName: url.lastPathComponent, mimeType: mime, compress: false))
         }
+        await sendWithCaption(files)
+    }
+
+    /// Подпись — текст из поля ввода (как в вебе); после отправки поле чистится.
+    private func sendWithCaption(_ files: [ChatViewModel.OutgoingFile], spoiler: Bool = false, viewOnce: Bool = false) async {
+        guard !files.isEmpty else { return }
+        let caption = viewOnce ? "" : model.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !caption.isEmpty { model.updateText("") }
+        await model.sendFiles(files, caption: caption, spoiler: spoiler, viewOnce: viewOnce)
     }
 }
 
@@ -272,54 +308,84 @@ final class VoiceRecorder {
     }
 }
 
-/// Создание опроса: вопрос, 2–10 вариантов, анонимность, несколько ответов, викторина.
+/// Создание опроса или чек-листа (с 2026-10-18): вопрос, варианты, анонимность,
+/// несколько ответов, викторина, свои варианты участников, скрытые итоги, срок.
 struct PollComposer: View {
     let model: ChatViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var checklist = false
     @State private var question = ""
     @State private var options = ["", ""]
     @State private var anonymous = true
     @State private var multiple = false
     @State private var quiz = false
     @State private var correct = 0
+    @State private var openAdd = false
+    @State private var hideResults = false
+    /// Закрыть сам через столько секунд; 0 — нет.
+    @State private var closeAfter = 0
     @State private var busy = false
 
     private var cleanOptions: [String] { options.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+    private var maxOptions: Int { checklist ? 30 : 10 }
+    private var minOptions: Int { checklist ? 1 : 2 }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Вопрос") {
-                    TextField("Вопрос", text: $question, axis: .vertical)
+                Section {
+                    Picker("Вид", selection: $checklist) {
+                        Text("Опрос").tag(false)
+                        Text("Чек-лист").tag(true)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                Section("Варианты") {
+                Section(checklist ? "Название" : "Вопрос") {
+                    TextField(checklist ? "Название" : "Вопрос", text: $question, axis: .vertical)
+                }
+                Section(checklist ? "Пункты" : "Варианты") {
                     ForEach(options.indices, id: \.self) { i in
                         HStack {
-                            if quiz {
+                            if quiz && !checklist {
                                 Button { correct = i } label: {
                                     Image(systemName: correct == i ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(correct == i ? Theme.success : Theme.muted)
                                 }
                                 .buttonStyle(.plain)
                             }
-                            TextField("Вариант \(i + 1)", text: $options[i])
+                            TextField(checklist ? "Пункт \(i + 1)" : "Вариант \(i + 1)", text: $options[i])
                         }
                     }
                     .onDelete { set in
-                        if options.count > 2 { options.remove(atOffsets: set) }
+                        if options.count > minOptions { options.remove(atOffsets: set) }
                     }
-                    if options.count < 10 {
-                        Button("Добавить вариант") { options.append("") }
+                    if options.count < maxOptions {
+                        Button(checklist ? "Добавить пункт" : "Добавить вариант") { options.append("") }
                     }
                 }
-                Section {
-                    Toggle("Анонимный", isOn: $anonymous)
-                    Toggle("Несколько ответов", isOn: $multiple).disabled(quiz)
-                    Toggle("Викторина", isOn: $quiz)
-                        .onChange(of: quiz) { _, on in if on { multiple = false } }
+                if checklist {
+                    Section {
+                        Toggle("Участники могут добавлять пункты", isOn: $openAdd)
+                    }
+                } else {
+                    Section {
+                        Toggle("Анонимный", isOn: $anonymous)
+                        Toggle("Несколько ответов", isOn: $multiple).disabled(quiz)
+                        Toggle("Викторина", isOn: $quiz)
+                            .onChange(of: quiz) { _, on in if on { multiple = false; openAdd = false } }
+                        Toggle("Участники могут добавлять свои варианты", isOn: $openAdd).disabled(quiz)
+                        Toggle("Итоги — только после завершения", isOn: $hideResults)
+                        Picker("Завершить сам", selection: $closeAfter) {
+                            Text("Нет").tag(0)
+                            Text("Через час").tag(3600)
+                            Text("Через сутки").tag(86400)
+                            Text("Через 3 дня").tag(3 * 86400)
+                            Text("Через неделю").tag(7 * 86400)
+                        }
+                    }
                 }
             }
-            .navigationTitle("Новый опрос")
+            .navigationTitle(checklist ? "Новый чек-лист" : "Новый опрос")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
@@ -330,18 +396,27 @@ struct PollComposer: View {
                         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
                         // Номер правильного — среди непустых вариантов
                         var correctIndex: Int?
-                        if quiz {
+                        if quiz && !checklist {
                             let kept = options.indices.filter { !options[$0].trimmingCharacters(in: .whitespaces).isEmpty }
                             correctIndex = kept.firstIndex(of: correct)
                         }
+                        var spec = MessageRepository.PollSpec(question: q, options: opts)
+                        spec.checklist = checklist
+                        spec.openAdd = openAdd && correctIndex == nil
+                        if !checklist {
+                            spec.multiple = multiple
+                            spec.anonymous = anonymous
+                            spec.correct = correctIndex
+                            spec.hideResults = hideResults
+                            if closeAfter > 0 { spec.closeAt = Date().addingTimeInterval(TimeInterval(closeAfter)) }
+                        }
                         Task {
-                            if await model.sendPoll(question: q, options: opts, multiple: multiple, anonymous: anonymous, correct: correctIndex) {
-                                dismiss()
-                            }
+                            if await model.sendPoll(spec) { dismiss() }
                             busy = false
                         }
                     }
-                    .disabled(busy || question.trimmingCharacters(in: .whitespaces).isEmpty || cleanOptions.count < 2 || (quiz && cleanOptions.count <= correct))
+                    .disabled(busy || question.trimmingCharacters(in: .whitespaces).isEmpty || cleanOptions.count < minOptions
+                              || (quiz && !checklist && cleanOptions.count <= correct))
                 }
             }
         }

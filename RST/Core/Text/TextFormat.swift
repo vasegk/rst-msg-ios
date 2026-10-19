@@ -76,7 +76,8 @@ enum TextFormat {
     /// Адрес — только http(s): javascript: и прочие схемы ссылкой не становятся.
     private static let labeledLinkRE = re(#"\[([^\]\n]+)\]\((https?://[^\s()<>\u0000]+)\)"#)
     private static let bareLinkRE = re(#"https?://[^\s<>\u0000]+"#)
-    private static let mentionRE = re(#"(^|\s)@([a-zA-Z0-9_-]+)"#)
+    /// @ник латиницей и @все/@онлайн (без продолжения буквой — «@всем» не упоминание).
+    private static let mentionRE = re(#"(^|\s)@([a-zA-Z0-9_-]+|все(?![\p{L}\p{N}_-])|онлайн(?![\p{L}\p{N}_-]))"#)
     private static let stashRE = re(#"\u0000(\d+)\u0000"#)
 
     // MARK: - Разбор

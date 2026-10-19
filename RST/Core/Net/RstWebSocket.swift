@@ -21,7 +21,8 @@ enum SessionEnd: Equatable {
 /// События сокета, разобранные из JSON.
 enum WsEvent {
     case newMessage(MessageDto, receiver: String)
-    case messageRead(id: Int64, receiver: String, reader: String?)
+    /// upTo (с 2026-10-07): прочитано всё своё в этом чате с id <= upTo.
+    case messageRead(id: Int64, upTo: Int64, receiver: String, reader: String?)
     case groupRead(group: String, reader: String, upTo: Int64)
     case messageEdited(id: Int64, content: String, receiver: String)
     case messageDeleted(id: Int64, receiver: String)
@@ -317,7 +318,7 @@ final class RstWebSocket {
             guard let dto = obj.decode(MessageDto.self) else { return nil }
             return .newMessage(dto, receiver: str("receiver") ?? "")
         case "msg_read":
-            return num("id").map { .messageRead(id: $0, receiver: str("receiver") ?? "", reader: str("reader")) }
+            return num("id").map { .messageRead(id: $0, upTo: num("up_to") ?? $0, receiver: str("receiver") ?? "", reader: str("reader")) }
         case "group_read":
             return num("up_to").map { .groupRead(group: str("group") ?? "", reader: str("reader") ?? "", upTo: $0) }
         case "msg_edited":
@@ -385,11 +386,14 @@ final class RstWebSocket {
         return true
     }
 
+    /// extra — дополнительные поля кадра (view_once, mention_all, mentions,
+    /// reminder, when_online): сервер их проверяет сам.
     func sendMessage(receiver: String, content: String, fileUrl: String? = nil, fileType: String? = nil,
                      replyTo: Int64? = nil, forwardedFrom: String? = nil, silent: Bool = false,
-                     poll: [String: JSONValue]? = nil, sendAt: String? = nil) -> Bool {
+                     poll: [String: JSONValue]? = nil, sendAt: String? = nil,
+                     extra: [String: JSONValue] = [:], schedule: Bool = false) -> Bool {
         var obj: [String: JSONValue] = [
-            "action": .string(sendAt != nil ? "schedule" : "send"),
+            "action": .string(sendAt != nil || schedule ? "schedule" : "send"),
             "receiver": .string(receiver),
             "content": .string(content),
             "file_url": fileUrl.map { .string($0) } ?? .null,
@@ -400,7 +404,18 @@ final class RstWebSocket {
         if silent { obj["silent"] = .bool(true) }
         if let poll { obj["poll"] = .object(poll) }
         if let sendAt { obj["send_at"] = .string(sendAt) }
+        for (k, v) in extra { obj[k] = v }
         return sendObject(obj)
+    }
+
+    /// Чек-лист: отметить или снять пункт (кем бы ни был отмечен).
+    func sendCheckToggle(messageId: Int64, option: Int) -> Bool {
+        sendObject(["action": .string("check_toggle"), "message_id": .number(Double(messageId)), "option": .number(Double(option))])
+    }
+
+    /// Свой вариант опроса или пункт чек-листа: текст зашифрован ключом чата.
+    func sendPollAddOption(messageId: Int64, content: String) -> Bool {
+        sendObject(["action": .string("poll_add_option"), "message_id": .number(Double(messageId)), "content": .string(content)])
     }
 
     func sendTyping(_ receiver: String, typing: Bool) {
