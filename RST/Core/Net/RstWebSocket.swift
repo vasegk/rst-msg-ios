@@ -18,6 +18,23 @@ enum SessionEnd: Equatable {
     }
 }
 
+/// msg_pinned / msg_unpinned. Чат события в группе — receiver («group_N»),
+/// в личке — тот из sender/receiver, кто не ты. pin_event — только у закрепа.
+struct PinChange {
+    let id: Int64
+    let pinned: Bool
+    /// Автор сообщения (не тот, кто закрепил).
+    let sender: String
+    let receiver: String
+    let pinnedBy: String?
+    let content: String?
+    let fileType: String?
+    /// Тема форума; nil — «Общее» или группа без тем.
+    let topicId: Int64?
+    let eventId: Int64?
+    let afterId: Int64?
+}
+
 /// События сокета, разобранные из JSON.
 enum WsEvent {
     case newMessage(MessageDto, receiver: String)
@@ -27,7 +44,7 @@ enum WsEvent {
     case messageEdited(id: Int64, content: String, receiver: String)
     case messageDeleted(id: Int64, receiver: String)
     case reactionUpdate(messageId: Int64, reactions: String, receiver: String)
-    case pinChanged(id: Int64, pinned: Bool, receiver: String, pinnedBy: String?)
+    case pinChanged(PinChange)
     case presence(username: String, online: Bool, lastSeen: String?)
     case typing(sender: String, receiver: String, typing: Bool)
     case profileUpdate(username: String, displayName: String?, avatarUrl: String?, bio: String?, status: String?)
@@ -332,7 +349,12 @@ final class RstWebSocket {
             else { reactions = "{}" }
             return num("message_id").map { .reactionUpdate(messageId: $0, reactions: reactions, receiver: str("receiver") ?? "") }
         case "msg_pinned", "msg_unpinned":
-            return num("id").map { .pinChanged(id: $0, pinned: action == "msg_pinned", receiver: str("receiver") ?? "", pinnedBy: str("pinned_by")) }
+            guard let id = num("id") else { return nil }
+            let event = obj["pin_event"]
+            return .pinChanged(PinChange(
+                id: id, pinned: action == "msg_pinned", sender: str("sender") ?? "", receiver: str("receiver") ?? "",
+                pinnedBy: str("pinned_by"), content: str("content"), fileType: str("file_type"),
+                topicId: num("topic_id"), eventId: event?["id"]?.int64, afterId: event?["after_id"]?.int64))
         case "presence":
             return .presence(username: str("username") ?? "", online: obj["online"]?.bool ?? false, lastSeen: str("last_seen"))
         case "typing", "stop_typing":

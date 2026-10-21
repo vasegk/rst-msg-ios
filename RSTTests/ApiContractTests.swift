@@ -203,6 +203,19 @@ final class ApiContractTests: XCTestCase {
         XCTAssertNotEqual(AccentMath.lighter("#2f7ff0"), "#2f7ff0")
     }
 
+    /// Закрепы в группах (PROMPT_ANDROID «Закрепы в группах и в группах с темами»):
+    /// строки /pin_events и поле topic_id.
+    func testPinEventsDecode() throws {
+        let raw = #"{"events":[{"id":"55","message_id":101,"actor":"bob","after_id":120,"created_at":"2026-10-21T10:00:00","sender":"ivan","content":"{\"iv\":\"a\",\"ciphertext\":\"b\"}","file_type":null,"topic_id":3},{"id":56,"message_id":102,"actor":"ivan","after_id":null,"topic_id":null}]}"#
+        let events = try XCTUnwrap(JSONDecoder().decode(PinEventsResponse.self, from: Data(raw.utf8)).events)
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].id, 55)
+        XCTAssertEqual(events[0].afterId, 120)
+        XCTAssertEqual(events[0].topicId, 3)
+        XCTAssertNil(events[1].afterId)
+        XCTAssertNil(events[1].topicId)
+    }
+
     /// Экспорт переписки: запись как formatExportMessage в js/chat-export.js.
     func testChatExportFormat() {
         var m = ChatMessage(id: 1, sender: "ivan", isMine: false, text: "Привет\nкак дела", createdAt: nil)

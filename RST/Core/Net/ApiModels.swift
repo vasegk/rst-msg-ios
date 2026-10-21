@@ -638,6 +638,41 @@ struct MessagesResponse: Decodable {
 
 struct PinnedResponse: Decodable { let messages: [MessageDto]? }
 
+/// Строка «закрепил(а)» (/pin_events): кто закрепил какое сообщение и после какого показать.
+struct PinEventDto: Decodable {
+    let id: Int64
+    let messageId: Int64
+    let actor: String?
+    let afterId: Int64?
+    let createdAt: String?
+    let sender: String?
+    let content: String?
+    let fileType: String?
+    let topicId: Int64?
+    enum CodingKeys: String, CodingKey {
+        case id, actor, sender, content
+        case messageId = "message_id"
+        case afterId = "after_id"
+        case createdAt = "created_at"
+        case fileType = "file_type"
+        case topicId = "topic_id"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeFlexibleInt64(.id) ?? 0
+        messageId = try c.decodeFlexibleInt64(.messageId) ?? 0
+        actor = try? c.decodeIfPresent(String.self, forKey: .actor)
+        afterId = try c.decodeFlexibleInt64(.afterId)
+        createdAt = try? c.decodeIfPresent(String.self, forKey: .createdAt)
+        sender = try? c.decodeIfPresent(String.self, forKey: .sender)
+        content = try? c.decodeIfPresent(String.self, forKey: .content)
+        fileType = try? c.decodeIfPresent(String.self, forKey: .fileType)
+        topicId = try c.decodeFlexibleInt64(.topicId)
+    }
+}
+
+struct PinEventsResponse: Decodable { let events: [PinEventDto]? }
+
 struct MediaResponse: Decodable { let media: [MessageDto]? }
 
 struct ReaderDto: Decodable, Identifiable {

@@ -168,8 +168,14 @@ final class RstApi {
         return try await get("/api/messages/\(path(me))/\(path(peer))?\(query)")
     }
 
-    func pinnedMessages(me: String, peer: String) async throws -> PinnedResponse {
-        try await get("/api/messages/\(path(me))/\(path(peer))/pinned")
+    /// Закреплённые; topicId — только своей темы форума (0 — «Общее»).
+    func pinnedMessages(me: String, peer: String, topicId: Int64? = nil) async throws -> PinnedResponse {
+        try await get("/api/messages/\(path(me))/\(path(peer))/pinned" + (topicId.map { "?topic_id=\($0)" } ?? ""))
+    }
+
+    /// Строки «закрепил(а)» в ленте: после after_id.
+    func pinEvents(me: String, peer: String, topicId: Int64? = nil) async throws -> PinEventsResponse {
+        try await get("/api/messages/\(path(me))/\(path(peer))/pin_events" + (topicId.map { "?topic_id=\($0)" } ?? ""))
     }
 
     func media(me: String, peer: String) async throws -> MediaResponse {

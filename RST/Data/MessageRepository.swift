@@ -193,9 +193,36 @@ final class MessageRepository {
         return (response.messages ?? []).map { decrypt($0, keys: keys) }
     }
 
-    func pinned(_ chatId: String) async throws -> [ChatMessage] {
+    /// Закреплённые; в теме форума — только этой темы (0 — «Общее»).
+    func pinned(_ chatId: String, topicId: Int64? = nil) async throws -> [ChatMessage] {
         let keys = try await readKeys(for: chatId)
-        return (try await api.pinnedMessages(me: me, peer: chatId).messages ?? []).map { decrypt($0, keys: keys) }
+        return (try await api.pinnedMessages(me: me, peer: chatId, topicId: topicId).messages ?? []).map { decrypt($0, keys: keys) }
+    }
+
+    /// Строка «Имя закрепил(а) «текст»» в ленте после сообщения afterId.
+    struct PinEvent: Identifiable, Equatable {
+        let id: Int64
+        let messageId: Int64
+        let actor: String
+        let afterId: Int64
+        let text: String
+    }
+
+    func pinEvents(_ chatId: String, topicId: Int64? = nil) async throws -> [PinEvent] {
+        let keys = try await readKeys(for: chatId)
+        let list = try await api.pinEvents(me: me, peer: chatId, topicId: topicId).events ?? []
+        return list.map { e in
+            PinEvent(id: e.id, messageId: e.messageId, actor: e.actor ?? "", afterId: e.afterId ?? e.messageId,
+                     text: Previews.describe(MessageCrypto.decrypt(keys, e.content), fileType: e.fileType))
+        }
+    }
+
+    /// Строка «закрепил(а)» из живого события msg_pinned.
+    func pinEvent(_ change: PinChange, chatId: String) async -> PinEvent? {
+        guard change.pinned, let eventId = change.eventId else { return nil }
+        let keys = try? await readKeys(for: chatId)
+        return PinEvent(id: eventId, messageId: change.id, actor: change.pinnedBy ?? "", afterId: change.afterId ?? change.id,
+                        text: Previews.describe(MessageCrypto.decrypt(keys, change.content), fileType: change.fileType))
     }
 
     func media(_ chatId: String) async throws -> [ChatMessage] {

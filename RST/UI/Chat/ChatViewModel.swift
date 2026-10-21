@@ -169,8 +169,23 @@ final class ChatViewModel {
         }
     }
 
+    /// Строки «закрепил(а)» в ленте, по after_id.
+    private(set) var pinEvents: [MessageRepository.PinEvent] = []
+
+    /// Полоса закреплённых и строки «закрепил(а)»; в теме — только её (0 — «Общее»).
     func loadPinned() async {
-        pinned = (try? await services.messages.pinned(chatId)) ?? pinned
+        pinned = (try? await services.messages.pinned(chatId, topicId: topic?.id)) ?? pinned
+        pinEvents = (try? await services.messages.pinEvents(chatId, topicId: topic?.id)) ?? pinEvents
+    }
+
+    /// Событие закрепа — этого чата? В группе чат — receiver, в личке — тот, кто не я;
+    /// в теме — только её закрепы (пустой topic_id — «Общее»).
+    func pinBelongs(_ change: PinChange) -> Bool {
+        let chat = change.receiver.hasPrefix("group_") ? change.receiver
+            : (change.sender == me ? change.receiver : change.sender)
+        guard chat == chatId else { return false }
+        if let topic, (change.topicId ?? 0) != topic.id { return false }
+        return true
     }
 
     /// Подписи участников («Модератор») — рядом с именем в ленте группы.
@@ -306,13 +321,19 @@ final class ChatViewModel {
             for i in messages.indices where messages[i].isMine && messages[i].id <= upTo {
                 messages[i].status = "read"
             }
-        case .pinChanged(let id, let isPinned, _, _):
-            guard let i = messages.firstIndex(where: { $0.id == id }) else {
-                Task { await loadPinned() }
-                return
+        case .pinChanged(let change):
+            guard pinBelongs(change) else { return }
+            if let i = messages.firstIndex(where: { $0.id == change.id }) { messages[i].isPinned = change.pinned }
+            if change.pinned {
+                Task {
+                    if let row = await services.messages.pinEvent(change, chatId: chatId), !pinEvents.contains(where: { $0.id == row.id }) {
+                        pinEvents.append(row)
+                    }
+                    pinned = (try? await services.messages.pinned(chatId, topicId: topic?.id)) ?? pinned
+                }
+            } else {
+                pinned.removeAll { $0.id == change.id }
             }
-            messages[i].isPinned = isPinned
-            Task { await loadPinned() }
         case .pollUpdate(let id, _, let poll, let my):
             guard let i = messages.firstIndex(where: { $0.id == id }), let current = messages[i].poll else { return }
             let base = messages[i].envelope?.poll?.options ?? current.options

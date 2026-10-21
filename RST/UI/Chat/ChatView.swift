@@ -453,10 +453,13 @@ private struct ChatContent: View {
         case message(ChatMessage, showSender: Bool, showAvatar: Bool)
         /// Альбом: подряд идущие вложения одного автора с общим a (до 10).
         case album([ChatMessage], showSender: Bool, showAvatar: Bool)
+        /// «Имя закрепил(а) «текст»» — после сообщения after_id.
+        case pinEvent(MessageRepository.PinEvent)
 
         var id: String {
             switch self {
             case .day(let d): return "day-\(Int(d.timeIntervalSince1970))"
+            case .pinEvent(let e): return "pin-\(e.id)"
             case .message(let m, _, _): return "m\(m.id)"
             // Прокрутка к сообщению альбома ищет id его первого вложения
             case .album(let list, _, _): return "m\(list.first?.id ?? 0)"
@@ -501,6 +504,9 @@ private struct ChatContent: View {
                 out.append(.album(group, showSender: !sameAsPrev, showAvatar: !sameAsNext))
             } else {
                 out.append(.message(m, showSender: !sameAsPrev, showAvatar: !sameAsNext))
+            }
+            for member in group {
+                for e in model.pinEvents where e.afterId == member.id { out.append(.pinEvent(e)) }
             }
         }
         return out
@@ -553,6 +559,20 @@ private struct ChatContent: View {
                                      showSender: showSender, showAvatar: showAvatar, model: model,
                                      onOpenImage: { viewerImage = $0 }, onForward: { forwarding = $0 })
                                 .id(item.id)
+                        case .pinEvent(let e):
+                            Button { model.jump(to: e.messageId) } label: {
+                                Text("\(e.actor == store.me ? "Вы" : store.displayName(e.actor)) закрепил(а) «\(e.text)»")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Theme.onSurface.opacity(0.85))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(Theme.card.opacity(0.8)))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 2)
+                            .padding(.horizontal, 24)
+                            .id(item.id)
                         }
                     }
                     Color.clear.frame(height: 6).id("bottom")
